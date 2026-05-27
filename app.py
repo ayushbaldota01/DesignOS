@@ -66,6 +66,20 @@ hole_dia = 6.0      # M6 clearance hole
 fillet_r = 2.0      # stress relief fillet
 wall_t = 5.0        # minimum wall thickness
 
+COMMON PATTERNS (use exactly):
+# Multiple holes — always this pattern
+hole_points = [(15, 15), (85, 15), (15, 45), (85, 45)]
+result = result.faces(">Z").workplane().pushPoints(hole_points).hole(hole_dia)
+
+FORBIDDEN PATTERNS:
+NEVER DO THESE — they cause execution failure:
+- Never use assert statements
+- Never use result.cut() for holes — use .faces(">Z").workplane().pushPoints([...]).hole(dia)
+- Never hardcode file paths — always use the variable: output_path
+- Never use chamfereach() — use .chamfer(size)
+- Never loop to create holes — use pushPoints() for multiple holes
+- Never add comments after code lines on same line for complex expressions
+
 QUALITY CHECKS BEFORE FINAL LINE:
 - No fillet radius larger than adjacent wall thickness
 - No hole closer to edge than its diameter
@@ -113,6 +127,10 @@ def call_ollama(model: str, prompt: str, system: str = "") -> str:
                 "prompt": prompt,
                 "system": system,
                 "stream": False,
+                "options": {
+                    "temperature": 0.1,  # lower = faster, more deterministic
+                    "num_predict": 500   # limit token output length
+                }
             },
             timeout=OLLAMA_TIMEOUT,
         )
