@@ -54,11 +54,26 @@ BEFORE GENERATING, THINK:
 5. Does the assembly make sense? Will it fit with mating parts?
 
 CODE RULES:
-- Always name dimensions as variables with units in comments
+- Always name dimensions as variables with units in comments.
 - Final shape: result
 - Last line: cq.exporters.export(result, output_path)
-- No markdown, no explanation, pure Python only
-- Operations order: base geometry → pockets/cuts → holes → fillets LAST
+- No markdown, no explanation, pure Python only.
+- Operations order: base geometry → pockets/cuts/slots → holes → fillets/chamfers LAST.
+
+CADQUERY SYNTAX RULES:
+1. Creating Holes:
+   - To make holes, ALWAYS use: result.faces(">Z").workplane().pushPoints(points_list).hole(diameter)
+   - NEVER loop to make multiple holes one by one.
+   - NEVER use result.cut() for simple holes.
+2. Creating Pockets/Cuts:
+   - Use result.faces(">Z").workplane().rect(w, h).cutBlind(-depth) or .cutThruAll()
+   - NEVER use result.cut() with a 2D profile. result.cut() is ONLY for subtracting one 3D Solid from another.
+3. Fillets and Chamfers:
+   - Fillets and Chamfers MUST be applied as the absolute last step.
+   - NEVER fillet and chamfer the same edge. If an edge is filleted, it cannot be chamfered.
+   - Keep selectors simple. Use basic selectors like ">Z", "<Z", "|Z", ">Y", or select all edges via result.edges().fillet(r).
+   - NEVER use complex boolean selector strings like "|Z or <X or >X" as they cause OpenCascade crashes.
+   - Make sure fillet/chamfer radius is smaller than the adjacent wall thickness to avoid geometry collapse.
 
 DIMENSION VARIABLES (always):
 length, width, height = 50.0, 30.0, 10.0  # mm
@@ -67,24 +82,27 @@ fillet_r = 2.0      # stress relief fillet
 wall_t = 5.0        # minimum wall thickness
 
 COMMON PATTERNS (use exactly):
-# Multiple holes — always this pattern
+# Multiple holes — always this pattern:
 hole_points = [(15, 15), (85, 15), (15, 45), (85, 45)]
 result = result.faces(">Z").workplane().pushPoints(hole_points).hole(hole_dia)
 
+# Rectangular pocket — always this pattern:
+result = result.faces(">Z").workplane().rect(20.0, 15.0).cutBlind(-5.0)
+
 FORBIDDEN PATTERNS:
 NEVER DO THESE — they cause execution failure:
-- Never use assert statements
-- Never use result.cut() for holes — use .faces(">Z").workplane().pushPoints([...]).hole(dia)
+- Never use assert statements.
+- Never use result.cut() for holes or pockets.
 - Never hardcode file paths — always use the variable: output_path
-- Never use chamfereach() — use .chamfer(size)
-- Never loop to create holes — use pushPoints() for multiple holes
-- Never add comments after code lines on same line for complex expressions
+- Never use chamfereach() or filleteach() — use .chamfer(size) or .fillet(radius)
+- Never loop to create holes — use pushPoints() for multiple holes.
+- Never add comments after code lines on same line for complex expressions.
 
 QUALITY CHECKS BEFORE FINAL LINE:
-- No fillet radius larger than adjacent wall thickness
-- No hole closer to edge than its diameter
-- No feature smaller than 1.5mm (unmachineable)
-- Verify part has correct orientation: XY = base plane, Z = build direction"""
+- No fillet radius larger than adjacent wall thickness.
+- No hole closer to edge than its diameter.
+- No feature smaller than 1.5mm (unmachineable).
+- Verify part has correct orientation: XY = base plane, Z = build direction."""
 
 REFINE_PROMPT = """You are a mechanical engineer reviewing a part request before modeling.
 
@@ -192,16 +210,24 @@ def execute_cadquery(script: str, job_id: str):
     stl_path = os.path.join(TEMP_DIR, f"{job_id}.stl")
     script_path = os.path.join(TEMP_DIR, f"{job_id}.py")
 
-    # Inject output paths and append an STL export for the 3-D viewer
+    # Inject output paths and append standard exports to guarantee they exist
     full_script = (
         f'output_path = r"{step_path}"\n'
         f'stl_output_path = r"{stl_path}"\n\n'
         f"{script}\n\n"
-        "# --- auto-appended STL export for viewer ---\n"
-        "try:\n"
-        "    cq.exporters.export(result, stl_output_path, exportType='STL')\n"
-        "except Exception:\n"
-        "    pass\n"
+        "# --- auto-appended exports to guarantee file generation ---\n"
+        "if 'result' in locals() or 'result' in globals():\n"
+        "    try:\n"
+        "        import os\n"
+        "        if not os.path.exists(output_path):\n"
+        "            cq.exporters.export(result, output_path)\n"
+        "    except Exception as e:\n"
+        "        print(f'STEP export failed: {e}')\n"
+        "    try:\n"
+        "        if not os.path.exists(stl_output_path):\n"
+        "            cq.exporters.export(result, stl_output_path, exportType='STL')\n"
+        "    except Exception as e:\n"
+        "        print(f'STL export failed: {e}')\n"
     )
 
     with open(script_path, "w", encoding="utf-8") as fh:
