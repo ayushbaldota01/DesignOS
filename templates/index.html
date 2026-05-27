@@ -745,6 +745,13 @@ async function pollStatus() {
     const r = await fetch(`/status/${currentJobId}`);
     const d = await r.json();
 
+    if (d.error) {
+      showError(d.error);
+      clearInterval(pollTimer);
+      pollTimer = null;
+      return;
+    }
+
     // Update status bar
     const stepLabels = {
       refining_prompt:  "Refining prompt …",
