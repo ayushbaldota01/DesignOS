@@ -186,3 +186,54 @@ export class CADViewer {
     this.renderer.setSize(w, h);
   }
 }
+
+// Face click detection
+const raycaster = new THREE.Raycaster();
+const mouse = new THREE.Vector2();
+
+document.addEventListener('DOMContentLoaded', () => {
+  const viewerCanvas = document.getElementById('viewerCanvas');
+  if (!viewerCanvas) return;
+  viewerCanvas.addEventListener('click', (e) => {
+      // In the new layout, window.viewerInstance.currentModel holds the mesh
+      const model = window.viewerInstance ? window.viewerInstance.currentModel : window.currentModel;
+      if (!model) return;
+      
+      const rect = viewerCanvas.getBoundingClientRect();
+      mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+      mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+      
+      // Need camera from viewer
+      const camera = window.viewerInstance ? window.viewerInstance.camera : null;
+      if (!camera) return;
+      
+      raycaster.setFromCamera(mouse, camera);
+      const intersects = raycaster.intersectObject(model, true);
+      
+      if (intersects.length > 0) {
+          const hit = intersects[0];
+          const normal = hit.face.normal.clone().transformDirection(hit.object.matrixWorld);
+          
+          let faceLabel = "FACE";
+          if (normal.z > 0.8) faceLabel = "TOP FACE";
+          else if (normal.z < -0.8) faceLabel = "BOTTOM FACE";
+          else if (Math.abs(normal.x) > 0.8) faceLabel = "SIDE FACE (X)";
+          else if (Math.abs(normal.y) > 0.8) faceLabel = "SIDE FACE (Y)";
+          
+          window.clickedFaceNormal = { x: normal.x, y: normal.y, z: normal.z };
+          window.clickedFaceLabel = faceLabel;
+          
+          const popup = document.getElementById('facePopup');
+          if (popup) {
+              document.getElementById('popupTitle').textContent = faceLabel;
+              popup.style.display = 'block';
+              popup.style.left = e.clientX + 'px';
+              popup.style.top = e.clientY + 'px';
+          }
+          
+          const originalEmissive = hit.object.material.emissive.clone();
+          hit.object.material.emissive = new THREE.Color(0x003344);
+          setTimeout(() => { if (hit.object) hit.object.material.emissive = originalEmissive; }, 1000);
+      }
+  });
+});

@@ -622,6 +622,7 @@ def status(job_id):
         "has_step_file": j["step_file"] is not None,
         "has_stl_file": j["stl_file"] is not None,
         "error": j["error"],
+        "script": j.get("script", "")
     })
 
 
@@ -729,6 +730,50 @@ def refine():
     t.start()
     return jsonify({"job_id": job_id})
 
+
+@app.route("/run-script", methods=["POST"])
+def run_script():
+    data = request.get_json(force=True)
+    raw_script = data.get("script", "").strip()
+    if not raw_script:
+        return jsonify({"error": "No script"}), 400
+    job_id = _new_job("ide_script")
+    def execute():
+        _log(job_id, "execute", "running", "Running script...")
+        success, error = execute_cadquery(raw_script, job_id)
+        status = "completed" if success else "failed"
+        jobs[job_id]["status"] = status
+        _log(job_id, "complete", "done" if success else "error", error or "Script executed successfully")
+    threading.Thread(target=execute, daemon=True).start()
+    return jsonify({"job_id": job_id})
+
+@app.route("/assist", methods=["POST"])
+def assist():
+    data = request.get_json(force=True)
+    instruction = data.get("instruction", "")
+    current_script = data.get("script", "")
+    face_label = data.get("face_label", "")
+    
+    face_context = f"\nUser clicked: {face_label}" if face_label else ""
+    
+    ASSIST_PROMPT = f"""You are a CadQuery 2.x expert. Modify this script.
+
+Current script:
+{current_script}
+{face_context}
+
+Instruction: "{instruction}"
+
+Rules:
+- Return ONLY the complete modified Python script
+- Keep output_path variable unchanged — never hardcode a path
+- Keep all # mm comments on dimension variables
+- Operations order: base → holes → pocket → fillets LAST
+- No markdown, no explanation, pure Python only"""
+
+    raw = call_ollama(QWEN_MODEL, ASSIST_PROMPT, "")
+    script = extract_python_code(raw)
+    return jsonify({"script": script})
 
 # ---------------------------------------------------------------------------
 
