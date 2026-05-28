@@ -25,20 +25,19 @@ function buildSliders(params, onChangeCallback) {
         wrapper.innerHTML = `
             <div class="param-header">
                 <span class="param-name">${p.name}</span>
-                <span class="param-value" id="val_${p.name}">${p.value}</span>
                 <span class="param-unit">mm</span>
             </div>
-            <input type="range" 
+            <input type="number" 
                    min="${p.min}" max="${p.max}" step="${p.step}" 
-                   value="${p.value}" id="slider_${p.name}"
-                   oninput="onSliderChange('${p.name}', this.value)">
+                   value="${p.value}" id="input_${p.name}"
+                   onchange="onSliderChange('${p.name}', this.value)"
+                   style="width:100%; padding:6px; background:var(--bg-input); border:1px solid var(--border); color:var(--text-primary); border-radius:4px;">
         `;
         container.appendChild(wrapper);
     });
 }
 
 function onSliderChange(name, value) {
-    document.getElementById(`val_${name}`).textContent = parseFloat(value).toFixed(1);
     // Update script in Monaco
     const current = window.monacoInstance ? window.monacoInstance.getValue() : window.currentScript;
     const updated = current.replace(

@@ -1,147 +1,844 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>DesignOS — Edit Mode</title>
-  <!-- Monaco Editor CDN -->
+  <title>DesignOS ΓÇö AI-Powered Text-to-CAD</title>
+  <meta name="description" content="Local AI-powered CAD generation using Ollama LLMs and CadQuery." />
+
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+
+  <!-- Three.js import map -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+    }
+  }
+  </script>
+
+  <style>
+    /* ================================================================
+       DESIGN SYSTEM ΓÇö DesignOS
+       Dark, minimal, engineering-forward. No gradients, no animations.
+       ================================================================ */
+
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+      /* Surface palette */
+      --bg-root:       #0b0d11;
+      --bg-primary:    #12141a;
+      --bg-secondary:  #181b22;
+      --bg-tertiary:   #1e222b;
+      --bg-input:      #151820;
+
+      /* Border */
+      --border:        #2a2e38;
+      --border-focus:  #4ea8de;
+
+      /* Text */
+      --text-primary:  #cdd6e4;
+      --text-secondary:#8892a4;
+      --text-muted:    #5a6374;
+      --text-accent:   #4ea8de;
+
+      /* Status */
+      --status-ok:     #3fb950;
+      --status-err:    #f85149;
+      --status-warn:   #d29922;
+      --status-run:    #4ea8de;
+
+      /* Fonts */
+      --font-ui:   'Inter', system-ui, -apple-system, sans-serif;
+      --font-mono: 'JetBrains Mono', 'Cascadia Code', 'Fira Code', monospace;
+
+      /* Sizing */
+      --radius:     4px;
+      --sidebar-w:  340px;
+    }
+
+    html, body {
+      height: 100%;
+      background: var(--bg-root);
+      color: var(--text-primary);
+      font-family: var(--font-ui);
+      font-size: 13px;
+      line-height: 1.5;
+      overflow: hidden;
+    }
+
+    /* ---- LAYOUT ---- */
+    #app {
+      display: grid;
+      grid-template-rows: 48px 1fr;
+      grid-template-columns: var(--sidebar-w) 1fr;
+      grid-template-areas:
+        "header  header"
+        "sidebar main";
+      height: 100vh;
+    }
+
+    /* ---- HEADER ---- */
+    #header {
+      grid-area: header;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 20px;
+      background: var(--bg-primary);
+      border-bottom: 1px solid var(--border);
+      z-index: 10;
+    }
+    #header .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    #header .brand svg { width: 22px; height: 22px; }
+    #header .brand h1 {
+      font-size: 15px;
+      font-weight: 700;
+      letter-spacing: 1.2px;
+      color: var(--text-primary);
+    }
+    #header .brand span {
+      font-size: 10px;
+      font-weight: 500;
+      color: var(--text-muted);
+      letter-spacing: 0.5px;
+      padding: 2px 6px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+    }
+    .health-indicators {
+      display: flex;
+      gap: 14px;
+      align-items: center;
+    }
+    .health-dot {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 11px;
+      font-family: var(--font-mono);
+      color: var(--text-secondary);
+    }
+    .health-dot .dot {
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      background: var(--text-muted);
+    }
+    .health-dot .dot.ok   { background: var(--status-ok); }
+    .health-dot .dot.fail { background: var(--status-err); }
+
+    /* ---- SIDEBAR ---- */
+    #sidebar {
+      grid-area: sidebar;
+      background: var(--bg-primary);
+      border-right: 1px solid var(--border);
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+    }
+    
+    /* Sidebar Tabs */
+    .sidebar-tabs {
+      display: flex;
+      border-bottom: 1px solid var(--border);
+      background: var(--bg-secondary);
+      flex-shrink: 0;
+    }
+    .tab-btn {
+      flex: 1;
+      padding: 12px 0;
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      transition: all 0.2s;
+    }
+    .tab-btn:hover {
+      color: var(--text-secondary);
+    }
+    .tab-btn.active {
+      color: var(--text-accent);
+      border-bottom-color: var(--text-accent);
+    }
+    
+    #ai-panel {
+      flex: 1;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+    }
+    
+    #editor-panel {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    
+    #script-editor {
+      flex: 1;
+      width: 100%;
+      resize: none;
+      background: var(--bg-input);
+      color: var(--text-primary);
+      border: none;
+      padding: 14px;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      line-height: 1.5;
+      outline: none;
+      white-space: pre;
+    }
+
+    .panel-section {
+      padding: 16px 18px;
+      border-bottom: 1px solid var(--border);
+    }
+    .panel-section:last-child { border-bottom: none; }
+    .panel-section h2 {
+      font-size: 10px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 1.4px;
+      color: var(--text-muted);
+      margin-bottom: 12px;
+    }
+
+    /* Form elements */
+    label {
+      display: block;
+      font-size: 11px;
+      font-weight: 500;
+      color: var(--text-secondary);
+      margin-bottom: 4px;
+    }
+    select, input[type="number"], input[type="text"] {
+      width: 100%;
+      padding: 7px 10px;
+      background: var(--bg-input);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      color: var(--text-primary);
+      font-family: var(--font-mono);
+      font-size: 12px;
+      outline: none;
+      margin-bottom: 10px;
+    }
+    select:focus, input:focus {
+      border-color: var(--border-focus);
+    }
+    select {
+      cursor: pointer;
+      -webkit-appearance: none;
+      appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%235a6374'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 10px center;
+      padding-right: 28px;
+    }
+    input[type="number"] { -moz-appearance: textfield; }
+    input[type="number"]::-webkit-inner-spin-button,
+    input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; }
+
+    .dim-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 8px;
+    }
+    .dim-row label { text-align: center; }
+    .dim-row input { text-align: center; }
+
+    /* Checkboxes */
+    .checkbox-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px 12px;
+    }
+    .cb-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      cursor: pointer;
+    }
+    .cb-item input[type="checkbox"] {
+      width: 14px; height: 14px;
+      margin: 0;
+      accent-color: var(--text-accent);
+      cursor: pointer;
+    }
+    .cb-item span {
+      font-size: 12px;
+      color: var(--text-secondary);
+    }
+
+    /* Buttons */
+    .btn-primary {
+      width: 100%;
+      padding: 10px 0;
+      background: var(--text-accent);
+      color: #0b0d11;
+      border: none;
+      border-radius: var(--radius);
+      font-family: var(--font-ui);
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 0.8px;
+      text-transform: uppercase;
+      cursor: pointer;
+    }
+    .btn-primary:hover { opacity: 0.88; }
+    .btn-primary:disabled {
+      opacity: 0.35;
+      cursor: not-allowed;
+    }
+
+    .btn-secondary {
+      width: 100%;
+      padding: 8px 0;
+      background: transparent;
+      color: var(--text-accent);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      font-family: var(--font-ui);
+      font-size: 11px;
+      font-weight: 500;
+      letter-spacing: 0.5px;
+      cursor: pointer;
+      margin-top: 8px;
+    }
+    .btn-secondary:hover { border-color: var(--text-accent); }
+    .btn-secondary:disabled { opacity: 0.35; cursor: not-allowed; }
+
+    /* ---- MAIN AREA ---- */
+    #main {
+      grid-area: main;
+      display: grid;
+      grid-template-rows: 1fr 220px;
+      overflow: hidden;
+    }
+
+    /* 3-D Viewer */
+    #viewer-wrap {
+      position: relative;
+      background: var(--bg-root);
+      overflow: hidden;
+    }
+    #viewer-canvas {
+      width: 100%;
+      height: 100%;
+    }
+    #viewer-overlay {
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      pointer-events: none;
+    }
+    #viewer-overlay .empty-state {
+      text-align: center;
+      color: var(--text-muted);
+    }
+    #viewer-overlay .empty-state svg {
+      width: 48px; height: 48px;
+      margin-bottom: 10px;
+      opacity: 0.3;
+    }
+    #viewer-overlay .empty-state p {
+      font-size: 12px;
+      letter-spacing: 0.4px;
+    }
+    .viewer-toolbar {
+      position: absolute;
+      top: 12px;
+      right: 12px;
+      display: flex;
+      gap: 6px;
+    }
+    .viewer-toolbar button {
+      padding: 5px 10px;
+      background: var(--bg-tertiary);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      color: var(--text-secondary);
+      font-family: var(--font-mono);
+      font-size: 10px;
+      cursor: pointer;
+    }
+    .viewer-toolbar button:hover { color: var(--text-primary); border-color: var(--text-accent); }
+
+    /* Generation status bar */
+    #status-bar {
+      position: absolute;
+      bottom: 12px; left: 12px; right: 12px;
+      display: none;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 14px;
+      background: var(--bg-tertiary);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+    }
+    #status-bar.visible { display: flex; }
+    #status-bar .spinner {
+      width: 14px; height: 14px;
+      border: 2px solid var(--border);
+      border-top-color: var(--text-accent);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    #status-bar .status-text {
+      font-size: 11px;
+      font-family: var(--font-mono);
+      color: var(--text-secondary);
+      flex: 1;
+    }
+    #status-bar .attempt-badge {
+      font-size: 10px;
+      font-family: var(--font-mono);
+      padding: 2px 8px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      color: var(--text-muted);
+    }
+
+    /* ---- LOG PANEL ---- */
+    #log-panel {
+      background: var(--bg-primary);
+      border-top: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+    }
+    #log-panel .log-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 16px;
+      border-bottom: 1px solid var(--border);
+    }
+    #log-panel .log-header h3 {
+      font-size: 10px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 1.2px;
+      color: var(--text-muted);
+    }
+    #download-btn {
+      padding: 5px 14px;
+      background: var(--status-ok);
+      color: #0b0d11;
+      border: none;
+      border-radius: var(--radius);
+      font-family: var(--font-ui);
+      font-size: 11px;
+      font-weight: 600;
+      cursor: pointer;
+      display: none;
+    }
+    #download-btn:hover { opacity: 0.88; }
+    #log-entries {
+      flex: 1;
+      overflow-y: auto;
+      padding: 8px 16px;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      line-height: 1.7;
+    }
+    .log-line {
+      display: flex;
+      gap: 8px;
+      align-items: flex-start;
+    }
+    .log-line .log-icon {
+      flex-shrink: 0;
+      width: 14px;
+      text-align: center;
+      margin-top: 2px;
+    }
+    .log-line .log-msg { color: var(--text-secondary); }
+    .log-line.running .log-icon { color: var(--status-run); }
+    .log-line.done    .log-icon { color: var(--status-ok); }
+    .log-line.error   .log-icon { color: var(--status-err); }
+    .log-detail {
+      margin: 2px 0 6px 22px;
+      padding: 6px 10px;
+      background: var(--bg-secondary);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      font-size: 10px;
+      color: var(--text-muted);
+      max-height: 80px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+
+    /* Refine bar */
+    #refine-section {
+      display: none;
+      padding: 12px 18px;
+      border-bottom: 1px solid var(--border);
+    }
+    #refine-section.visible { display: block; }
+    #refine-section .refine-row {
+      display: flex;
+      gap: 8px;
+    }
+    #refine-section input {
+      flex: 1;
+      margin-bottom: 0;
+    }
+    #refine-section button {
+      flex-shrink: 0;
+      padding: 7px 14px;
+      background: var(--bg-tertiary);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      color: var(--text-accent);
+      font-family: var(--font-ui);
+      font-size: 11px;
+      font-weight: 500;
+      cursor: pointer;
+    }
+    #refine-section button:hover { border-color: var(--text-accent); }
+
+    /* Scrollbars */
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+  </style>
   <script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.44.0/min/vs/loader.js"></script>
-  <!-- Three.js CDN -->
-  <script src="https://cdn.jsdelivr.net/npm/three@0.155.0/build/three.min.js"></script>
   <link rel="stylesheet" href="/static/ide.css">
 </head>
 <body>
-  <!-- HEADER -->
-  <header class="ide-header">
-    <span class="logo">⬡ DESIGNOS</span>
-    <span class="mode-indicator" id="modeIndicator">FORM MODE</span>
-    <div class="header-right">
+
+<div id="app">
+
+  <!-- ==================== HEADER ==================== -->
+  <header id="header">
+    <div class="brand">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+        <path d="M2 17l10 5 10-5"/>
+        <path d="M2 12l10 5 10-5"/>
+      </svg>
+      <h1>DESIGNOS</h1>
+      <span>LOCAL AI ┬╖ CAD</span>
+    </div>
+    <span class="mode-indicator" id="modeIndicator" style="margin-right:auto; margin-left: 20px;">FORM MODE</span>
+    <div class="header-right" style="display:flex; gap:12px; margin-right: 20px; align-items:center;">
       <span id="runStatus" class="run-status"></span>
-      <button id="toggleScript" class="btn-secondary" style="display:none">Show Script</button>
-      <button id="downloadBtn" class="btn-secondary" style="display:none">↓ STEP</button>
+      <button id="toggleScript" class="btn-secondary" style="display:none; margin:0;">Show Script</button>
+    </div>
+    <div class="health-indicators" id="health-indicators">
+      <div class="health-dot"><span class="dot" id="dot-ollama"></span>Ollama</div>
+      <div class="health-dot"><span class="dot" id="dot-qwen"></span>Qwen</div>
+      <div class="health-dot"><span class="dot" id="dot-cadquery"></span>CadQuery</div>
+      <div class="health-dot"><span class="dot" id="dot-gpu"></span><span id="gpu-label">GPU</span></div>
     </div>
   </header>
 
   <!-- STAGE 1: FORM MODE -->
-  <div id="formStage" class="stage">
-    <!-- From existing index.html -->
-    <aside id="sidebar" style="width: 340px; border-right: 1px solid var(--border); overflow-y: auto;">
-      <div id="ai-panel">
-        <div class="panel-section">
-          <h2>Part Definition</h2>
-          <label for="part-type">Part Type</label>
-          <select id="part-type" style="width:100%; padding: 8px; margin-bottom: 12px; background: var(--bg); color: var(--text); border: 1px solid var(--border);">
-            <option value="Bracket">Bracket</option>
-            <option value="Plate">Plate</option>
-            <option value="Shaft">Shaft</option>
-            <option value="Beam">I-Beam</option>
-            <option value="Housing">Housing</option>
-            <option value="Gear">Gear</option>
-            <option value="Flange">Flange</option>
-            <option value="Custom">Custom</option>
-          </select>
-        </div>
-        <div class="panel-section">
-          <h2>Dimensions (mm)</h2>
-          <div class="dim-row" style="display:flex; gap: 8px;">
-            <div style="flex:1;"><label for="dim-l">Length</label><input type="number" id="dim-l" value="100" style="width:100%; padding:6px; background:var(--bg); border:1px solid var(--border); color:var(--text);" /></div>
-            <div style="flex:1;"><label for="dim-w">Width</label><input type="number" id="dim-w" value="60" style="width:100%; padding:6px; background:var(--bg); border:1px solid var(--border); color:var(--text);" /></div>
-            <div style="flex:1;"><label for="dim-h">Height</label><input type="number" id="dim-h" value="20" style="width:100%; padding:6px; background:var(--bg); border:1px solid var(--border); color:var(--text);" /></div>
-          </div>
-        </div>
-        <div class="panel-section">
-          <h2>Features</h2>
-          <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 8px;">
-            <label><input type="checkbox" id="feat-holes" checked /> Holes</label>
-            <label><input type="checkbox" id="feat-fillets" checked /> Fillets</label>
-            <label><input type="checkbox" id="feat-chamfers" /> Chamfers</label>
-            <label><input type="checkbox" id="feat-pockets" /> Pockets</label>
-            <label><input type="checkbox" id="feat-shell" /> Shell</label>
-            <label><input type="checkbox" id="feat-boss" /> Boss</label>
-          </div>
-        </div>
-        <div class="panel-section">
-          <h2>Material</h2>
-          <select id="material" style="width:100%; padding: 8px; background: var(--bg); color: var(--text); border: 1px solid var(--border);">
-            <option value="Steel">Steel</option>
-            <option value="Aluminium" selected>Aluminium</option>
-            <option value="PLA">PLA (3D Print)</option>
-          </select>
-        </div>
-        <div class="panel-section">
-          <h2>Custom Notes</h2>
-          <input type="text" id="notes" placeholder="e.g. Add 4 M6 holes" style="width:100%; padding:8px; background:var(--bg); border:1px solid var(--border); color:var(--text);" />
-        </div>
-        <div class="panel-section">
-          <button class="btn-primary" id="btn-generate" style="width:100%; padding: 12px; background: var(--accent); color: #000; border:none; font-weight:bold; cursor:pointer;">▶ GENERATE</button>
-        </div>
-      </div>
-    </aside>
-    <main style="flex:1; display:flex; flex-direction:column; padding: 20px;">
-      <h2 style="font-size:12px; color:var(--accent); margin-bottom: 12px; letter-spacing:1px;">GENERATION LOG</h2>
-      <div id="log-entries" style="flex:1; border:1px solid var(--border); background:#151515; padding: 16px; font-family: monospace; overflow-y:auto; font-size: 11px;">
-        <div style="color:var(--text-dim);">Waiting for generation...</div>
-      </div>
-    </main>
-  </div>
+<div id="formStage" style="display: contents">
+<!-- ==================== SIDEBAR ==================== -->
+  <aside id="sidebar">
 
-  <!-- STAGE 2: EDIT MODE (hidden until generation complete) -->
-  <div id="editStage" class="stage" style="display:none">
-    <div class="edit-layout">
-      
-      <!-- LEFT: Sliders -->
-      <div class="slider-panel" id="sliderPanel">
-        <div class="panel-title">PARAMETERS</div>
-        <div id="slidersContainer"></div>
-        <button class="btn-back" id="backBtn">← New Part</button>
-      </div>
-
-      <!-- CENTER: 3D Viewer -->
-      <div class="viewer-panel">
-        <canvas id="viewerCanvas"></canvas>
-        <!-- Face click popup -->
-        <div id="facePopup" class="face-popup" style="display:none">
-          <div class="popup-title" id="popupTitle">TOP FACE</div>
-          <button onclick="faceAction('Add holes here')">+ Holes</button>
-          <button onclick="faceAction('Add pocket here')">+ Pocket</button>
-          <button onclick="faceAction('Add fillet to all edges')">+ Fillet</button>
-          <button onclick="faceAction('Add boss here')">+ Boss</button>
-          <button class="btn-close" onclick="closePopup()">✕</button>
-        </div>
-      </div>
-
-      <!-- RIGHT: Script (hidden by default) -->
-      <div class="script-panel" id="scriptPanel" style="display:none">
-        <div class="panel-title" style="padding:16px;">SCRIPT</div>
-        <div id="monacoEditor" style="height:100%"></div>
-      </div>
-
+    <!-- Tabs -->
+    <div class="sidebar-tabs">
+      <button class="tab-btn active" id="tab-ai">AI Config</button>
+      <button class="tab-btn" id="tab-editor">Script Editor</button>
     </div>
 
-    <!-- BOTTOM: AI Chat -->
-    <div class="ai-panel">
-      <span class="ai-label">AI ›</span>
-      <input type="text" id="aiInput" class="ai-input" 
-             placeholder='e.g. "add 4 M6 holes on top face" or "increase wall thickness"'/>
-      <button id="aiBtn" class="btn-assist">MODIFY</button>
-      <span id="aiStatus" class="ai-status"></span>
+    <div id="ai-panel">
+      <!-- Part type -->
+      <div class="panel-section">
+      <h2>Part Definition</h2>
+      <label for="part-type">Part Type</label>
+      <select id="part-type">
+        <option value="Bracket">Bracket</option>
+        <option value="Plate">Plate</option>
+        <option value="Shaft">Shaft</option>
+        <option value="Beam">I-Beam</option>
+        <option value="Housing">Housing</option>
+        <option value="Gear">Gear</option>
+        <option value="Flange">Flange</option>
+        <option value="Custom">Custom</option>
+      </select>
+    </div>
+
+    <!-- Dimensions -->
+    <div class="panel-section">
+      <h2>Dimensions (mm)</h2>
+      <div class="dim-row">
+        <div>
+          <label for="dim-l">Length</label>
+          <input type="number" id="dim-l" value="100" min="1" step="1" />
+        </div>
+        <div>
+          <label for="dim-w">Width</label>
+          <input type="number" id="dim-w" value="60" min="1" step="1" />
+        </div>
+        <div>
+          <label for="dim-h">Height</label>
+          <input type="number" id="dim-h" value="20" min="1" step="1" />
+        </div>
+      </div>
+    </div>
+
+    <!-- Features -->
+    <div class="panel-section">
+      <h2>Features</h2>
+      <div class="checkbox-grid">
+        <label class="cb-item"><input type="checkbox" id="feat-holes" checked /><span>Holes</span></label>
+        <label class="cb-item"><input type="checkbox" id="feat-fillets" checked /><span>Fillets</span></label>
+        <label class="cb-item"><input type="checkbox" id="feat-chamfers" /><span>Chamfers</span></label>
+        <label class="cb-item"><input type="checkbox" id="feat-pockets" /><span>Pockets</span></label>
+        <label class="cb-item"><input type="checkbox" id="feat-shell" /><span>Shell</span></label>
+        <label class="cb-item"><input type="checkbox" id="feat-boss" /><span>Boss</span></label>
+      </div>
+    </div>
+
+    <!-- Material -->
+    <div class="panel-section">
+      <h2>Material</h2>
+      <label for="material">Material</label>
+      <select id="material">
+        <option value="Steel">Steel</option>
+        <option value="Aluminium" selected>Aluminium</option>
+        <option value="PLA">PLA (3D Print)</option>
+        <option value="Brass">Brass</option>
+        <option value="Titanium">Titanium</option>
+        <option value="Nylon">Nylon</option>
+      </select>
+    </div>
+
+    <!-- Notes -->
+    <div class="panel-section">
+      <h2>Custom Notes</h2>
+      <label for="notes">Additional instructions</label>
+      <input type="text" id="notes" placeholder="e.g. Add 4 M6 mounting holes at corners" />
+    </div>
+
+    <!-- Generate -->
+    <div class="panel-section">
+      <button class="btn-primary" id="btn-generate">Γû╢&ensp;GENERATE</button>
+      <button class="btn-secondary" id="btn-clear">CLEAR</button>
+    </div>
+
+      <!-- Refine (shown after successful generation) -->
+      <div id="refine-section">
+        <h2 style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:1.4px;color:var(--text-muted);margin-bottom:8px;">Refine Design</h2>
+        <div class="refine-row">
+          <input type="text" id="refine-input" placeholder="e.g. Make holes larger" />
+          <button id="btn-refine">REFINE</button>
+        </div>
+      </div>
+    </div> <!-- End ai-panel -->
+
+    <!-- Editor Panel -->
+    <div id="editor-panel" style="display: none;">
+      <textarea id="script-editor" spellcheck="false" placeholder="import cadquery as cq
+
+# Your code here...
+result = cq.Workplane('XY').box(50, 50, 50)"></textarea>
+      <div class="panel-section" style="border-top: 1px solid var(--border); flex-shrink: 0;">
+        <button class="btn-primary" id="btn-execute-script">Γû╢&ensp;EXECUTE SCRIPT</button>
+      </div>
+    </div>
+
+  </aside>
+
+  <!-- ==================== MAIN ==================== -->
+  <main id="main">
+
+    <!-- 3-D Viewer -->
+    <div id="viewer-wrap">
+      <div id="viewer-canvas"></div>
+
+      <div id="viewer-overlay">
+        <div class="empty-state" id="empty-state">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>
+            <polyline points="3.27 6.96 12 12.01 20.73 6.96"/>
+            <line x1="12" y1="22.08" x2="12" y2="12"/>
+          </svg>
+          <p>Configure your part and hit GENERATE</p>
+        </div>
+      </div>
+
+      <div class="viewer-toolbar" id="viewer-toolbar" style="display:none;">
+        <button id="btn-reset-cam">RESET VIEW</button>
+        <button id="btn-wireframe">WIREFRAME</button>
+      </div>
+
+      <div id="status-bar">
+        <div class="spinner"></div>
+        <span class="status-text" id="status-text">Initialising ΓÇª</span>
+        <span class="attempt-badge" id="attempt-badge">1 / 3</span>
+      </div>
+    </div>
+
+    <!-- Log Panel -->
+    <div id="log-panel">
+      <div class="log-header">
+        <h3>Generation Log</h3>
+        <button id="download-btn">Γ¼ç&ensp;Download STEP</button>
+      </div>
+      <div id="log-entries">
+        <div class="log-line" style="color:var(--text-muted);">Waiting for generation ΓÇª</div>
+      </div>
+    </div>
+
+  </main>
+</div> <!-- End formStage -->
+
+<!-- STAGE 2: EDIT MODE -->
+<div id="editStage" class="stage" style="display:none; grid-column: 1 / -1; width: 100%;">
+  <div class="edit-layout">
+    <div class="slider-panel" id="sliderPanel">
+      <div class="panel-title">PARAMETERS</div>
+      <div id="slidersContainer"></div>
+      <button class="btn-back" id="backBtn">← New Part</button>
+    </div>
+    <div class="viewer-panel" id="editViewerContainer">
+      <div id="viewerCanvas" style="width:100%; height:100%;"></div>
+      <div id="facePopup" class="face-popup" style="display:none">
+        <div class="popup-title" id="popupTitle">TOP FACE</div>
+        <button onclick="faceAction('Add holes here')">+ Holes</button>
+        <button onclick="faceAction('Add pocket here')">+ Pocket</button>
+        <button onclick="faceAction('Add fillet to all edges')">+ Fillet</button>
+        <button onclick="faceAction('Add boss here')">+ Boss</button>
+        <button class="btn-close" onclick="closePopup()">✕</button>
+      </div>
+    </div>
+    <div class="script-panel" id="scriptPanel" style="display:none">
+      <div class="panel-title" style="padding:16px;">SCRIPT</div>
+      <div id="monacoEditor" style="height:100%"></div>
     </div>
   </div>
+  <div class="ai-panel">
+    <span class="ai-label">AI ›</span>
+    <input type="text" id="aiInput" class="ai-input" placeholder='e.g. "add 4 M6 holes on top face"'/>
+    <button id="aiBtn" class="btn-assist">MODIFY</button>
+    <span id="aiStatus" class="ai-status"></span>
+  </div>
+</div>
 
+</div> <!-- end #app -->
+
+
+<!-- ==================== APPLICATION LOGIC ==================== -->
 <script type="module">
 import { CADViewer } from "/static/viewer.js";
-window.viewerInstance = new CADViewer("viewerCanvas");
 
+// ----- Elements -----
+const btnGenerate   = document.getElementById("btn-generate");
+const btnClear      = document.getElementById("btn-clear");
+const btnDownload   = document.getElementById("download-btn");
+const btnResetCam   = document.getElementById("btn-reset-cam");
+const btnWireframe  = document.getElementById("btn-wireframe");
+const btnRefine     = document.getElementById("btn-refine");
+const refineInput   = document.getElementById("refine-input");
+const refineSection = document.getElementById("refine-section");
+const statusBar     = document.getElementById("status-bar");
+const statusText    = document.getElementById("status-text");
+const attemptBadge  = document.getElementById("attempt-badge");
+const logEntries    = document.getElementById("log-entries");
+const emptyState    = document.getElementById("empty-state");
+const viewerToolbar = document.getElementById("viewer-toolbar");
+
+// Editor UI
+const tabAi         = document.getElementById("tab-ai");
+const tabEditor     = document.getElementById("tab-editor");
+const aiPanel       = document.getElementById("ai-panel");
+const editorPanel   = document.getElementById("editor-panel");
+const scriptEditor  = document.getElementById("script-editor");
+const btnExecute    = document.getElementById("btn-execute-script");
+
+// ----- State -----
+let viewer = null;
 let currentJobId = null;
 let pollTimer = null;
-let lastLogLen = 0;
+let wireframeOn = false;
 
+// ----- Initialise Viewer -----
+// Module scripts are deferred, so DOM is ready by the time this runs.
+viewer = new CADViewer("viewer-canvas");
+checkHealth();
+
+// ----- Tab Switching -----
+tabAi.addEventListener("click", () => {
+  tabAi.classList.add("active");
+  tabEditor.classList.remove("active");
+  aiPanel.style.display = "flex";
+  editorPanel.style.display = "none";
+});
+
+tabEditor.addEventListener("click", () => {
+  tabEditor.classList.add("active");
+  tabAi.classList.remove("active");
+  editorPanel.style.display = "flex";
+  aiPanel.style.display = "none";
+});
+
+// ----- Editor Behaviors -----
+scriptEditor.addEventListener("keydown", (e) => {
+  if (e.key === "Tab") {
+    e.preventDefault();
+    const start = scriptEditor.selectionStart;
+    const end = scriptEditor.selectionEnd;
+    scriptEditor.value = scriptEditor.value.substring(0, start) + "    " + scriptEditor.value.substring(end);
+    scriptEditor.selectionStart = scriptEditor.selectionEnd = start + 4;
+  }
+});
+
+// ----- Health Check -----
+async function checkHealth() {
+  try {
+    const r = await fetch("/health");
+    const d = await r.json();
+    setDot("dot-ollama",  d.ollama);
+    setDot("dot-qwen",    d.qwen);
+    setDot("dot-cadquery", d.cadquery);
+    if (d.gpu) {
+      setDot("dot-gpu", true);
+      document.getElementById("gpu-label").textContent = d.gpu.name;
+    } else {
+      setDot("dot-gpu", false);
+    }
+  } catch {
+    ["dot-ollama","dot-qwen","dot-cadquery","dot-gpu"].forEach(id => setDot(id, false));
+  }
+}
+function setDot(id, ok) {
+  const el = document.getElementById(id);
+  el.classList.toggle("ok", !!ok);
+  el.classList.toggle("fail", !ok);
+}
+
+// ----- Dynamic UI Updates -----
 const partTypeSelect = document.getElementById("part-type");
 const labelL = document.querySelector('label[for="dim-l"]');
 const labelW = document.querySelector('label[for="dim-w"]');
 const labelH = document.querySelector('label[for="dim-h"]');
-const containerW = document.getElementById('dim-w').parentElement;
-const containerH = document.getElementById('dim-h').parentElement;
+const containerW = labelW.parentElement;
+const containerH = labelH.parentElement;
 
 partTypeSelect.addEventListener("change", () => {
   const t = partTypeSelect.value;
@@ -165,93 +862,302 @@ partTypeSelect.addEventListener("change", () => {
     labelH.textContent = "Height";
   }
 });
+partTypeSelect.dispatchEvent(new Event('change'));
 
-document.getElementById('btn-generate').addEventListener('click', async () => {
-    document.getElementById('btn-generate').disabled = true;
-    document.getElementById('log-entries').innerHTML = '';
-    
-    const feats = [];
-    if (document.getElementById("feat-holes").checked) feats.push("mounting holes");
-    if (document.getElementById("feat-fillets").checked) feats.push("filleted edges");
-    if (document.getElementById("feat-chamfers").checked) feats.push("chamfered edges");
-    if (document.getElementById("feat-pockets").checked) feats.push("pockets / cutouts");
-    if (document.getElementById("feat-shell").checked) feats.push("hollow shell");
-    if (document.getElementById("feat-boss").checked) feats.push("bosses / standoffs");
-    
-    const payload = {
-        part_type: partTypeSelect.value,
-        length: parseFloat(document.getElementById('dim-l').value) || 100,
-        width: parseFloat(document.getElementById('dim-w').value) || 60,
-        height: parseFloat(document.getElementById('dim-h').value) || 20,
-        material: document.getElementById('material').value,
-        features: feats,
-        notes: document.getElementById('notes').value
-    };
-    
-    const res = await fetch('/generate', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify(payload)
-    });
-    const d = await res.json();
-    currentJobId = d.job_id;
-    pollTimer = setInterval(pollStatus, 800);
-});
+// ----- Build prompt from form -----
+function buildPrompt() {
+  const type = document.getElementById("part-type").value;
+  const l    = document.getElementById("dim-l").value;
+  const w    = document.getElementById("dim-w").value;
+  const h    = document.getElementById("dim-h").value;
+  const mat  = document.getElementById("material").value;
+  const notes = document.getElementById("notes").value.trim();
 
-async function pollStatus() {
-    const res = await fetch(`/status/${currentJobId}`);
-    const d = await res.json();
-    
-    // update logs
-    if (d.log.length > lastLogLen) {
-        for (let i = lastLogLen; i < d.log.length; i++) {
-            const div = document.createElement('div');
-            div.textContent = `> ${d.log[i].message}`;
-            document.getElementById('log-entries').appendChild(div);
-        }
-        lastLogLen = d.log.length;
-    }
-    
-    if (d.status === 'completed') {
-        clearInterval(pollTimer);
-        // Let's transition to edit mode!
-        onGenerationComplete(currentJobId, d.script || "");
-    } else if (d.status === 'failed') {
-        clearInterval(pollTimer);
-        document.getElementById('btn-generate').disabled = false;
-        alert("Generation failed: " + d.error);
-    }
+  const feats = [];
+  if (document.getElementById("feat-holes").checked)    feats.push("mounting holes");
+  if (document.getElementById("feat-fillets").checked)  feats.push("filleted edges");
+  if (document.getElementById("feat-chamfers").checked) feats.push("chamfered edges");
+  if (document.getElementById("feat-pockets").checked)  feats.push("pockets / cutouts");
+  if (document.getElementById("feat-shell").checked)    feats.push("hollow shell");
+  if (document.getElementById("feat-boss").checked)     feats.push("bosses / standoffs");
+
+  let prompt = `Design a ${type} with dimensions ${l}mm (L) ├ù ${w}mm (W) ├ù ${h}mm (H). Material: ${mat}.`;
+  if (feats.length) prompt += ` Features: ${feats.join(", ")}.`;
+  if (notes)        prompt += ` Additional: ${notes}.`;
+  return prompt;
 }
 
-function onGenerationComplete(jobId, script) {
+// ----- Generate -----
+btnGenerate.addEventListener("click", async () => {
+  const partType = document.getElementById("part-type").value;
+  const length = document.getElementById("dim-l").value || 100;
+  const width = document.getElementById("dim-w").value || 60;
+  const height = document.getElementById("dim-h").value || 20;
+  const material = document.getElementById("material").value;
+  const notesElement = document.getElementById("notes");
+  const notes = notesElement ? notesElement.value.trim() : "";
+
+  const selectedFeatures = [];
+  if (document.getElementById("feat-holes").checked)    selectedFeatures.push("mounting holes");
+  if (document.getElementById("feat-fillets").checked)  selectedFeatures.push("filleted edges");
+  if (document.getElementById("feat-chamfers").checked) selectedFeatures.push("chamfered edges");
+  if (document.getElementById("feat-pockets").checked)  selectedFeatures.push("pockets / cutouts");
+  if (document.getElementById("feat-shell").checked)    selectedFeatures.push("hollow shell");
+  if (document.getElementById("feat-boss").checked)     selectedFeatures.push("bosses / standoffs");
+
+  btnGenerate.disabled = true;
+  btnDownload.style.display = "none";
+  refineSection.classList.remove("visible");
+  logEntries.innerHTML = "";
+  emptyState.style.display = "none";
+  statusBar.classList.add("visible");
+  statusText.textContent = "Starting generation ΓÇª";
+  attemptBadge.textContent = "1 / 3";
+
+  if (viewer) viewer.clear();
+
+  try {
+    const r = await fetch("/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        prompt: notes || "",
+        part_type: partType,
+        length: parseFloat(length),
+        width: parseFloat(width),
+        height: parseFloat(height),
+        material: material,
+        features: selectedFeatures,
+        notes: notes
+      }),
+    });
+    const d = await r.json();
+    if (d.error) { showError(d.error); return; }
+    currentJobId = d.job_id;
+    startPolling();
+  } catch (e) {
+    showError("Failed to reach backend: " + e.message);
+  }
+});
+
+// ----- Execute Manual Script -----
+btnExecute.addEventListener("click", async () => {
+  const script = scriptEditor.value.trim();
+  if (!script) return;
+
+  btnExecute.disabled = true;
+  btnDownload.style.display = "none";
+  refineSection.classList.remove("visible");
+  logEntries.innerHTML = "";
+  emptyState.style.display = "none";
+  statusBar.classList.add("visible");
+  statusText.textContent = "Executing script ΓÇª";
+  attemptBadge.textContent = "Manual";
+
+  if (viewer) viewer.clear();
+
+  try {
+    const r = await fetch("/execute_raw_script", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ script }),
+    });
+    const d = await r.json();
+    if (d.error) { showError(d.error); btnExecute.disabled = false; return; }
+    currentJobId = d.job_id;
+    startPolling();
+  } catch (e) {
+    showError("Failed to reach backend: " + e.message);
+    btnExecute.disabled = false;
+  }
+});
+
+// ----- Refine -----
+function startPolling() {
+  if (pollTimer) clearInterval(pollTimer);
+  pollTimer = setInterval(() => pollStatus(), 800);
+}
+
+let lastLogLen = 0;
+
+async function pollStatus() {
+  if (!currentJobId) return;
+  try {
+    const r = await fetch(`/status/${currentJobId}`);
+    const d = await r.json();
+
+    if (d.error) {
+      showError(d.error);
+      clearInterval(pollTimer);
+      pollTimer = null;
+      return;
+    }
+
+    // Update status bar
+    const stepLabels = {
+      calculating_params: "Calculating parameters ΓÇª",
+      assembling_script:  "Assembling from templates ΓÇª",
+      executing:          "Executing CadQuery ΓÇª",
+      retrying:           "Retrying with safe defaults ΓÇª",
+      done:               "Complete",
+      failed:             "Generation failed",
+    };
+    statusText.textContent = stepLabels[d.step] || d.step;
+    attemptBadge.textContent = `${d.attempt} / ${d.max_attempts}`;
+
+    // Render new log entries
+    if (d.log.length > lastLogLen) {
+      for (let i = lastLogLen; i < d.log.length; i++) {
+        appendLog(d.log[i]);
+      }
+      lastLogLen = d.log.length;
+    }
+
+    // Terminal states
+    if (d.status === "completed") {
+      clearInterval(pollTimer);
+      pollTimer = null;
+      statusBar.classList.remove("visible");
+      
+      onGenerationComplete(currentJobId, d.script || "");
+      
+    } else if (d.status === "failed") {
+      clearInterval(pollTimer);
+      pollTimer = null;
+      statusBar.classList.remove("visible");
+      btnGenerate.disabled = false;
+      btnExecute.disabled = false;
+      showError(d.error || "Generation failed after all retries.");
+    }
+  } catch { /* keep polling */ }
+}
+
+function appendLog(entry) {
+  const icons = { running: "Γùî", done: "Γ£ô", error: "Γ£ù" };
+  const div = document.createElement("div");
+  div.className = `log-line ${entry.status}`;
+  div.innerHTML = `<span class="log-icon">${icons[entry.status] || "┬╖"}</span><span class="log-msg">${escHtml(entry.message)}</span>`;
+  logEntries.appendChild(div);
+
+  if (entry.detail) {
+    const det = document.createElement("div");
+    det.className = "log-detail";
+    det.textContent = entry.detail;
+    logEntries.appendChild(det);
+  }
+  logEntries.scrollTop = logEntries.scrollHeight;
+}
+
+function showError(msg) {
+  statusBar.classList.remove("visible");
+  btnGenerate.disabled = false;
+  btnExecute.disabled = false;
+  appendLog({ status: "error", message: msg });
+}
+
+function escHtml(s) {
+  const d = document.createElement("div");
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+// ----- Download -----
+btnDownload.addEventListener("click", () => {
+  if (currentJobId) {
+    window.location.href = `/download/${currentJobId}`;
+  }
+});
+
+// ----- Clear -----
+btnClear.addEventListener("click", () => {
+  if (viewer) viewer.clear();
+  logEntries.innerHTML = '<div class="log-line" style="color:var(--text-muted);">Waiting for generation ΓÇª</div>';
+  btnDownload.style.display = "none";
+  refineSection.classList.remove("visible");
+  emptyState.style.display = "block";
+  document.getElementById("viewer-overlay").style.display = "flex";
+  viewerToolbar.style.display = "none";
+  currentJobId = null;
+  lastLogLen = 0;
+  if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+});
+
+// ----- Viewer toolbar -----
+btnResetCam.addEventListener("click", () => { if (viewer) viewer.resetCamera(); });
+btnWireframe.addEventListener("click", () => {
+  if (!viewer || !viewer.currentModel) return;
+  wireframeOn = !wireframeOn;
+  viewer.currentModel.material.wireframe = wireframeOn;
+  btnWireframe.textContent = wireframeOn ? "SOLID" : "WIREFRAME";
+});
+
+// ----- Refine -----
+btnRefine.addEventListener("click", async () => {
+  const instruction = refineInput.value.trim();
+  if (!instruction || !currentJobId) return;
+
+  btnRefine.disabled = true;
+  btnDownload.style.display = "none";
+  logEntries.innerHTML = "";
+  lastLogLen = 0;
+  statusBar.classList.add("visible");
+  statusText.textContent = "Refining design ΓÇª";
+
+  try {
+    const r = await fetch("/refine", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ job_id: currentJobId, instruction }),
+    });
+    const d = await r.json();
+    if (d.error) { showError(d.error); btnRefine.disabled = false; return; }
+    currentJobId = d.job_id;
+    startPolling();
+    btnRefine.disabled = false;
+    refineInput.value = "";
+  } catch (e) {
+    showError("Refine failed: " + e.message);
+    btnRefine.disabled = false;
+  }
+});
+
+// --- NEW PATH B LOGIC ---
+
+window.viewerInstance = null;
+
+window.onGenerationComplete = function(jobId, script) {
     window.currentScript = script;
     window.currentJobId = jobId;
     
     document.getElementById('formStage').style.display = 'none';
     document.getElementById('editStage').style.display = 'flex';
     document.getElementById('modeIndicator').textContent = 'EDIT MODE';
-    document.getElementById('downloadBtn').style.display = 'block';
     document.getElementById('toggleScript').style.display = 'block';
     
+    // Create new viewer inside editStage if not exists
+    if (!window.viewerInstance) {
+        window.viewerInstance = new CADViewer("viewerCanvas");
+    }
     window.viewerInstance.loadSTL(`/model/${jobId}`);
     
-    const params = parseSliders(script);
-    buildSliders(params, onSliderChange);
-    initMonaco(script);
+    if (typeof parseSliders === 'function') {
+        const params = parseSliders(script);
+        buildSliders(params, onSliderChange);
+    }
+    if (typeof initMonaco === 'function') {
+        initMonaco(script);
+    }
 }
-
-document.getElementById('downloadBtn').addEventListener('click', () => {
-    window.location.href = `/download/${window.currentJobId}`;
-});
 
 document.getElementById('backBtn').addEventListener('click', () => {
     document.getElementById('editStage').style.display = 'none';
-    document.getElementById('formStage').style.display = 'flex';
+    document.getElementById('formStage').style.display = 'grid'; // because #app is grid, but formStage is block, wait. formStage contains #sidebar and #main, it should be display: flex or something. Actually, let's reset to initial.
+    // Wait, #formStage is display: flex if we add a class. But let's just make it display: flex or grid depending on CSS. 
+    // Wait, original #app was grid! I broke the grid layout by wrapping it in formStage!
+    document.getElementById('formStage').style.display = 'contents'; 
     document.getElementById('modeIndicator').textContent = 'FORM MODE';
-    document.getElementById('downloadBtn').style.display = 'none';
     document.getElementById('toggleScript').style.display = 'none';
-    document.getElementById('btn-generate').disabled = false;
-    window.viewerInstance.clear();
+    btnGenerate.disabled = false;
 });
 
 window.runCurrentScript = async function() {
@@ -275,6 +1181,10 @@ window.runCurrentScript = async function() {
             document.getElementById('runStatus').className = 'run-status done';
             window.currentJobId = d.job_id;
             window.viewerInstance.loadSTL(`/model/${d.job_id}`);
+            if (typeof parseSliders === 'function') {
+                const params = parseSliders(stat.script || script);
+                buildSliders(params, onSliderChange);
+            }
         } else if (stat.status === 'failed') {
             clearInterval(execTimer);
             document.getElementById('runStatus').textContent = 'Error';
@@ -282,11 +1192,8 @@ window.runCurrentScript = async function() {
         }
     }, 800);
 }
-</script>
 
-<script src="/static/sliders.js"></script>
-<script src="/static/editor.js"></script>
-<script>
+// AI logic
 async function triggerAI() {
     const instruction = document.getElementById('aiInput').value.trim();
     if (!instruction) return;
@@ -302,7 +1209,6 @@ async function triggerAI() {
         body: JSON.stringify({
             instruction,
             script,
-            face_normal: window.clickedFaceNormal || null,
             face_label: window.clickedFaceLabel || null
         })
     });
@@ -314,8 +1220,10 @@ async function triggerAI() {
         if (window.monacoInstance) {
             window.monacoInstance.setValue(data.script);
         }
-        buildSliders(parseSliders(data.script), onSliderChange);
-        await runCurrentScript();
+        if (typeof parseSliders === 'function') {
+            buildSliders(parseSliders(data.script), onSliderChange);
+        }
+        await window.runCurrentScript();
     }
     
     document.getElementById('aiStatus').textContent = '';
@@ -328,17 +1236,19 @@ document.getElementById('aiInput').addEventListener('keydown', e => {
     if (e.key === 'Enter') triggerAI();
 });
 
-function faceAction(action) {
-    closePopup();
+window.faceAction = function(action) {
+    window.closePopup();
     document.getElementById('aiInput').value = `${action} on the ${window.clickedFaceLabel.toLowerCase()}`;
     triggerAI();
 }
 
-function closePopup() {
-    document.getElementById('facePopup').style.display = 'none';
+window.closePopup = function() {
+    const popup = document.getElementById('facePopup');
+    if (popup) popup.style.display = 'none';
 }
-window.faceAction = faceAction;
-window.closePopup = closePopup;
+
 </script>
+<script src="/static/sliders.js"></script>
+<script src="/static/editor.js"></script>
 </body>
 </html>

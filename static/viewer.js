@@ -215,13 +215,16 @@ document.addEventListener('DOMContentLoaded', () => {
           const normal = hit.face.normal.clone().transformDirection(hit.object.matrixWorld);
           
           let faceLabel = "FACE";
-          if (normal.z > 0.8) faceLabel = "TOP FACE";
-          else if (normal.z < -0.8) faceLabel = "BOTTOM FACE";
-          else if (Math.abs(normal.x) > 0.8) faceLabel = "SIDE FACE (X)";
-          else if (Math.abs(normal.y) > 0.8) faceLabel = "SIDE FACE (Y)";
+          let cqSelector = "'>Z'";
+          if (normal.z > 0.8) { faceLabel = "TOP FACE"; cqSelector = "'>Z'"; }
+          else if (normal.z < -0.8) { faceLabel = "BOTTOM FACE"; cqSelector = "'<Z'"; }
+          else if (normal.x > 0.8) { faceLabel = "SIDE FACE (+X)"; cqSelector = "'>X'"; }
+          else if (normal.x < -0.8) { faceLabel = "SIDE FACE (-X)"; cqSelector = "'<X'"; }
+          else if (normal.y > 0.8) { faceLabel = "SIDE FACE (+Y)"; cqSelector = "'>Y'"; }
+          else if (normal.y < -0.8) { faceLabel = "SIDE FACE (-Y)"; cqSelector = "'<Y'"; }
           
           window.clickedFaceNormal = { x: normal.x, y: normal.y, z: normal.z };
-          window.clickedFaceLabel = faceLabel;
+          window.clickedFaceLabel = `${faceLabel} (recommended CadQuery selector: ${cqSelector})`;
           
           const popup = document.getElementById('facePopup');
           if (popup) {

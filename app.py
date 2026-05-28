@@ -251,11 +251,13 @@ def assemble_script(form_data: dict, params: dict) -> str:
         "from templates import BASE_TEMPLATES, FEATURE_MAP",
         "",
         f"# {part_type.upper()} | {length}x{width}x{height}mm",
-        f"length, width, height = {length}, {width}, {height}",
-        f"wall_t = {wall_t}",
-        f"hole_dia = {hole_dia}",
+        f"length = {length} # mm",
+        f"width = {width} # mm",
+        f"height = {height} # mm",
+        f"wall_t = {wall_t} # mm",
+        f"hole_dia = {hole_dia} # mm",
         f"hole_points = {safe_pts}",
-        f"fillet_r = {fillet_r}",
+        f"fillet_r = {fillet_r} # mm",
         "",
     ]
 
@@ -738,11 +740,15 @@ def run_script():
     if not raw_script:
         return jsonify({"error": "No script"}), 400
     job_id = _new_job("ide_script")
+    jobs[job_id]["script"] = raw_script
     def execute():
         _log(job_id, "execute", "running", "Running script...")
         success, error = execute_cadquery(raw_script, job_id)
         status = "completed" if success else "failed"
         jobs[job_id]["status"] = status
+        if success:
+            jobs[job_id]["step_file"] = os.path.join(TEMP_DIR, f"{job_id}.step")
+            jobs[job_id]["stl_file"] = os.path.join(TEMP_DIR, f"{job_id}.stl")
         _log(job_id, "complete", "done" if success else "error", error or "Script executed successfully")
     threading.Thread(target=execute, daemon=True).start()
     return jsonify({"job_id": job_id})
@@ -768,6 +774,7 @@ Rules:
 - Return ONLY the complete modified Python script
 - Keep output_path variable unchanged — never hardcode a path
 - Keep all # mm comments on dimension variables
+- Use valid CadQuery string selectors for faces (e.g. '>Z', '<Y', '>X'). NEVER use '@Y' or '@X' as they are invalid.
 - Operations order: base → holes → pocket → fillets LAST
 - No markdown, no explanation, pure Python only"""
 
