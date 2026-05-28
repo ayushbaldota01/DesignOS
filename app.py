@@ -261,9 +261,11 @@ def assemble_script(form_data: dict, params: dict) -> str:
 
     # Base geometry
     if part_type == "bracket":
-        lines.append(f"result = BASE_TEMPLATES['bracket'](length, width, height, wall_t)")
+        lines.append(f"result = BASE_TEMPLATES['l_bracket'](height={height}, base_length={length}, width={width}, thickness={wall_t}, root_fillet=min({wall_t} * 0.5, 5.0))")
+    elif part_type == "beam":
+        lines.append(f"result = BASE_TEMPLATES['i_beam'](height={height}, width={width}, length={length}, web_thickness={wall_t}, flange_thickness={wall_t * 1.5})")
     elif part_type == "shaft":
-        lines.append(f"result = BASE_TEMPLATES['shaft'](min(length,width), max(length,width))")
+        lines.append(f"result = BASE_TEMPLATES['two_stage_parallel_shaft'](d1={width}, l1={length*0.5}, d2={height}, l2={length*0.5})")
     elif part_type == "housing":
         lines.append(f"result = BASE_TEMPLATES['housing'](length, width, height, wall_t)")
     elif part_type == "channel":
@@ -277,7 +279,10 @@ def assemble_script(form_data: dict, params: dict) -> str:
 
     # Features — strict order: holes → pockets → shell → boss → chamfers → fillets LAST
     if has_holes and safe_pts:
-        lines.append(f"result = FEATURE_MAP['holes'](result, hole_points, hole_dia)")
+        if part_type == "bracket":
+            lines.append(f"result = FEATURE_MAP['flange_holes'](result, face_tag='flange_base', dia={hole_dia}, clearance={hole_dia * 2.0})")
+        else:
+            lines.append(f"result = FEATURE_MAP['holes'](result, hole_points, {hole_dia})")
     if has_pockets:
         lines.append(f"result = FEATURE_MAP['pockets'](result, {pocket_w}, {pocket_l}, {pocket_depth})")
     if has_boss:
@@ -285,7 +290,10 @@ def assemble_script(form_data: dict, params: dict) -> str:
     if has_chamfers:
         lines.append(f"result = FEATURE_MAP['chamfers'](result, 1.0)")
     if has_fillets:
-        lines.append(f"result = FEATURE_MAP['fillets'](result, fillet_r)")
+        if part_type in ["bracket", "beam", "shaft"]:
+            lines.append(f"result = FEATURE_MAP['smart_fillet'](result, {fillet_r})")
+        else:
+            lines.append(f"result = FEATURE_MAP['fillets'](result, {fillet_r})")
 
     lines.append("")
     lines.append("cq.exporters.export(result, output_path)")
