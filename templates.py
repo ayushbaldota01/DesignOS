@@ -4,6 +4,7 @@ Each base template returns a CadQuery Workplane. Each feature add-on
 takes an existing result + parameters and returns the modified result.
 All dimensions in mm.
 """
+import math
 import cadquery as cq
 
 # ═══════════════════════════════════════════════════════════════════
@@ -13,74 +14,80 @@ import cadquery as cq
 def make_bracket(length, width, height, wall_t):
     """Self-validating L-shaped mounting bracket.
 
-    Internally clamps material thickness to guarantee correct proportions
-    regardless of what parameters are passed. The bracket will always have
-    a thin base plate and a tall vertical wall.
-
-    Geometry (after creation):
-      - Base plate on XY plane, centered at origin
-      - Vertical wall rises from the back (-Y) edge
-      - Z=0 is at the base plate midplane
+    Constructs a clean 2D profile on the YZ plane and extrudes it along X,
+    ensuring it is perfectly centered on all three axes (X, Y, Z).
+    Includes an integrated inner corner stress-relief fillet.
     """
     # ── INTERNAL PARAMETER VALIDATION ──
-    # Material thickness must be thin relative to all dimensions.
-    # This is the single most important guard — it prevents fat bases
-    # and stubby walls that make the bracket look wrong.
     min_dim = min(length, width, height)
     t = min(wall_t, height * 0.15, width * 0.15, 5.0)
     t = max(t, max(1.5, min_dim * 0.04))
     t = round(t, 2)
 
-    wall_h = height - t  # guaranteed to be ~85%+ of height
+    wall_h = height - t
 
-    # ── BASE PLATE ──
-    base = cq.Workplane("XY").box(length, width, t)
-    # Tag base top BEFORE union so hole placement targets the flat plate
-    base = base.faces(">Z").tag("base_top")
+    # ── STRESS-RELIEF FILLET RADIUS ──
+    fillet_r = min(t * 0.8, wall_h * 0.4, (width - t) * 0.4)
+    fillet_r = max(fillet_r, 0.0)
 
-    # ── VERTICAL WALL on back edge ──
-    wall = (
-        cq.Workplane("XY")
-        .box(length, t, wall_h)
-        .translate((0, -width / 2 + t / 2, (wall_h + t) / 2))
-    )
-    result = base.union(wall)
-
-    # ── STRESS-RELIEF FILLET at inner corner ──
-    fillet_r = min(t * 0.8, wall_h * 0.15, (width - t) * 0.08)
+    # ── 2D SKETCH ON YZ PLANE ──
+    profile = cq.Workplane("YZ")
+    
     if fillet_r >= 0.5:
-        try:
-            result = result.edges(
-                cq.selectors.NearestToPointSelector(
-                    (0, -width / 2 + t, t / 2)
-                )
-            ).fillet(fillet_r)
-        except Exception:
-            pass
+        cy = -width/2 + t + fillet_r
+        cz = t/2 + fillet_r
+        my = cy - fillet_r * 0.7071067811865475
+        mz = cz - fillet_r * 0.7071067811865475
+        
+        profile = (
+            profile
+            .moveTo(width/2, -t/2)
+            .lineTo(-width/2, -t/2)
+            .lineTo(-width/2, height - t/2)
+            .lineTo(-width/2 + t, height - t/2)
+            .lineTo(-width/2 + t, t/2 + fillet_r)
+            .threePointArc((my, mz), (cy, t/2))
+            .lineTo(width/2, t/2)
+            .close()
+        )
+    else:
+        profile = (
+            profile
+            .moveTo(width/2, -t/2)
+            .lineTo(-width/2, -t/2)
+            .lineTo(-width/2, height - t/2)
+            .lineTo(-width/2 + t, height - t/2)
+            .lineTo(-width/2 + t, t/2)
+            .lineTo(width/2, t/2)
+            .close()
+        )
 
+    # Extrude and center
+    result = profile.extrude(length).translate((-length/2, 0, 0))
+    
+    # Tag base top face (for holes)
+    # Center of base top face is at (0, t/2, t/2)
+    base_top_sel = cq.selectors.NearestToPointSelector((0, t/2, t/2))
+    result = result.faces(base_top_sel).workplane().tag("base_top").end().end()
+    
     return result
 
 
 def make_plate(length, width, height):
     """Flat rectangular plate."""
-    return cq.Workplane("XY").box(length, width, height).faces(">Z").tag("base_top")
+    return cq.Workplane("XY").box(length, width, height).faces(">Z").workplane().tag("base_top").end().end()
 
 
 def make_shaft(diameter, length):
     """Cylindrical shaft extruded along Z."""
-    return cq.Workplane("XY").circle(diameter / 2).extrude(length).faces(">Z").tag("base_top")
+    return cq.Workplane("XY").circle(diameter / 2).extrude(length).faces(">Z").workplane().tag("base_top").end().end()
 
 
 def make_housing(length, width, height, wall_t):
     """Hollow box housing (shelled)."""
-    # Shell removes the top face. The interior floor is at Z = -height/2 + wall_t
-    # But often holes go in the bottom floor. Let's tag the bottom exterior face?
-    # Or interior floor? Let's tag the interior floor for bosses/pockets.
     box = cq.Workplane("XY").box(length, width, height)
     housed = box.faces(">Z").shell(-wall_t)
-    # The floor inside the housing has normal +Z
-    # It is the lowest face pointing +Z.
-    return housed.faces("<Z[1]").tag("base_top")
+    return housed.faces("<Z[1]").workplane().tag("base_top").end().end()
 
 
 def make_channel(length, width, height, wall_t):
@@ -92,18 +99,17 @@ def make_channel(length, width, height, wall_t):
         .translate((0, 0, wall_t / 2))
     )
     chan = outer.cut(inner)
-    # The inner floor is the lowest +Z face
-    return chan.faces("<Z[1]").tag("base_top")
+    return chan.faces("<Z[1]").workplane().tag("base_top").end().end()
 
 
 def make_flange(length, width, height, wall_t):
     """Flat flange plate (same as plate)."""
-    return cq.Workplane("XY").box(length, width, height).faces(">Z").tag("base_top")
+    return cq.Workplane("XY").box(length, width, height).faces(">Z").workplane().tag("base_top").end().end()
 
 
 def make_gear(diameter, height):
     """Simplified gear blank."""
-    return cq.Workplane("XY").circle(diameter / 2).extrude(height).faces(">Z").tag("base_top")
+    return cq.Workplane("XY").circle(diameter / 2).extrude(height).faces(">Z").workplane().tag("base_top").end().end()
 
 
 BASE_TEMPLATES = {
