@@ -38,61 +38,34 @@ jobs: dict = {}
 # ---------------------------------------------------------------------------
 
 QWEN_SYSTEM_PROMPT = """\
-You are a CadQuery 2.x code generator. Output ONLY valid Python code. No markdown fences, no explanation, no comments except on dimension lines.
+You are a mechanical engineering parameter calculator.
+You receive a part specification and return ONLY a JSON object with calculated parameters.
+No Python code. No CadQuery. No explanation. Pure JSON only.
 
-TEMPLATE — follow this structure exactly:
+CALCULATION RULES:
+- wall_t = max(3.0, min_dimension * 0.15) for aluminium, max(2.5, min_dimension*0.12) for steel
+- fillet_r = min(wall_t * 0.4, 2.0) — never exceed wall_t
+- hole_dia: M4=4.5mm, M5=5.5mm, M6=6.6mm, M8=9mm (clearance holes)
+- hole_points: symmetric pattern, min edge clearance = hole_dia * 1.5 from part edge
+- For bracket: holes go on BASE PLATE ONLY, y_offset=0 (center of base)
+- pocket_depth max = height * 0.6
 
-import cadquery as cq
+COORDINATE SYSTEM: Origin at part center. X=length, Y=width, Z=height.
+Hole points are offsets FROM CENTER of the face.
 
-# Dimensions
-length = 100.0
-width = 60.0
-height = 20.0
-hole_dia = 6.0
-fillet_r = 2.0
-
-# Base shape
-result = cq.Workplane("XY").box(length, width, height)
-
-# Holes (if needed) — ALWAYS use pushPoints, NEVER loop
-hole_points = [(20, 15), (-20, 15), (20, -15), (-20, -15)]
-result = result.faces(">Z").workplane().pushPoints(hole_points).hole(hole_dia)
-
-# Fillets (if needed) — ALWAYS last step, keep radius small
-result = result.edges().fillet(fillet_r)
-
-# Export — ALWAYS use output_path variable (it is pre-defined)
-cq.exporters.export(result, output_path)
-
-ABSOLUTE RULES:
-1. The variable `output_path` is ALREADY defined before your code runs. Use it directly.
-2. The final solid MUST be called `result`.
-3. The last line MUST be: cq.exporters.export(result, output_path)
-4. NEVER use assert statements.
-5. NEVER use for-loops to create holes — use pushPoints().
-6. NEVER use result.cut() — use .hole(), .cutBlind(), or .cutThruAll() instead.
-7. NEVER hardcode output filenames like "part.stl" or "bracket.step".
-8. NEVER use complex edge selectors like "|Z or <X or >X" — they crash OpenCascade.
-9. For fillets: use result.edges().fillet(r) to fillet ALL edges, or result.edges("|Z").fillet(r) for vertical edges only. Keep it simple.
-10. NEVER fillet AND chamfer. Pick one or the other.
-11. Keep fillet radius <= 30% of the smallest dimension to avoid geometry failure.
-12. Output ONLY Python code. No markdown, no ``` fences, no text before or after."""
-
-REFINE_PROMPT = """\
-You are a mechanical engineer. Analyze the part request and return ONLY a JSON object:
+Return this exact JSON structure:
 {
-  "part_type": "",
-  "function": "",
-  "length_mm": 0,
-  "width_mm": 0,
-  "height_mm": 0,
-  "wall_thickness_mm": 0,
-  "holes": [{"diameter_mm": 0, "x_mm": 0, "y_mm": 0}],
-  "fillet_radius_mm": 0,
-  "material": "",
-  "notes": ""
-}
-Return ONLY the JSON. No explanation."""
+  "wall_t": 0.0,
+  "hole_dia": 0.0,
+  "hole_points": [[0,0]],
+  "fillet_r": 0.0,
+  "chamfer_size": 0.0,
+  "pocket_w": 0.0,
+  "pocket_l": 0.0,
+  "pocket_depth": 0.0,
+  "boss_dia": 0.0,
+  "boss_height": 0.0
+}"""
 
 
 # ---------------------------------------------------------------------------
@@ -152,36 +125,172 @@ def sanitise_script(script: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Pipeline stages
+# Pipeline stages — Template-based assembly
 # ---------------------------------------------------------------------------
 
-def refine_prompt(prompt: str) -> str:
-    """Convert natural-language prompt into a structured engineering spec."""
-    raw = call_ollama(
-        QWEN_MODEL,
-        f"Part request: {prompt}",
-        REFINE_PROMPT,
+def build_spec_string(form_data: dict) -> str:
+    """Build a human-readable spec string for Qwen parameter calculation."""
+    part_type = form_data.get("part_type", "Part")
+    length = float(form_data.get("length", 100))
+    width = float(form_data.get("width", 60))
+    height = float(form_data.get("height", 20))
+    material = form_data.get("material", "Steel")
+    features = form_data.get("features", [])
+    notes = form_data.get("notes", "")
+
+    return (
+        f"Part: {part_type}\n"
+        f"Dimensions: {length}mm (L) x {width}mm (W) x {height}mm (H)\n"
+        f"Material: {material}\n"
+        f"Features: {', '.join(features) if features else 'None'}\n"
+        f"Notes: {notes if notes else 'Standard design'}\n"
+        f"Calculate parameters for this part. Return ONLY JSON."
     )
-    cleaned = raw.strip()
-    # Extract from markdown json block if wrapped
-    for pattern in (r"```json\s*\n(.*?)```", r"```\s*\n(.*?)```"):
-        m = re.search(pattern, cleaned, re.DOTALL)
-        if m:
-            cleaned = m.group(1).strip()
-            break
-    return cleaned
 
 
-def generate_cadquery_script(spec: str) -> str:
-    """Ask Qwen to produce a CadQuery Python script."""
-    raw = call_ollama(
-        QWEN_MODEL,
-        f"Generate a CadQuery script for this part:\n{spec}",
-        QWEN_SYSTEM_PROMPT,
-    )
-    script = extract_python_code(raw)
-    script = sanitise_script(script)
-    return script
+def get_params_from_qwen(spec: str) -> dict:
+    raw = call_ollama(QWEN_MODEL, spec, QWEN_SYSTEM_PROMPT)
+    try:
+        import re, json
+        match = re.search(r'\{[\s\S]*?\}', raw)
+        if match:
+            params = json.loads(match.group())
+            # Validate types — reject anything non-numeric
+            numeric_keys = ["wall_t","hole_dia","fillet_r","chamfer_size","pocket_w","pocket_l","pocket_depth","boss_dia","boss_height"]
+            for k in numeric_keys:
+                if k in params:
+                    try:
+                        params[k] = float(params[k])
+                    except:
+                        del params[k]
+            return params
+    except:
+        pass
+    return {}
+
+
+def assemble_script(form_data: dict, params: dict) -> str:
+    part_type = form_data.get("part_type", "plate").lower()
+    length = float(form_data.get("length", 100))
+    width = float(form_data.get("width", 60))
+    height = float(form_data.get("height", 20))
+    features = [f.lower() for f in form_data.get("features", [])]
+
+    # ── TRANSLATE UI FEATURE NAMES EARLY ──
+    # UI sends "mounting holes", "edge fillets" etc.  We need boolean flags.
+    f_str = " ".join(features)
+    has_holes = "hole" in f_str
+    has_fillets = "fillet" in f_str
+    has_chamfers = "chamfer" in f_str
+    has_pockets = "pocket" in f_str
+    has_boss = "boss" in f_str
+    has_shell = "shell" in f_str
+
+    # ── SAFE PARAMETER DEFAULTS ──
+    min_dim = min(length, width, height)
+
+    # Wall thickness: clamp tightly — max 15% of smallest dim or 5mm
+    wall_t = float(params.get("wall_t") or max(2.0, min_dim * 0.1))
+    wall_t = min(wall_t, min_dim * 0.15, 5.0)
+    wall_t = max(wall_t, 1.5)
+
+    hole_dia = float(params.get("hole_dia") or 6.6)
+    hole_dia = min(hole_dia, min_dim * 0.15)  # hole can't be huge
+    hole_dia = max(hole_dia, 2.0)
+
+    # Validate and sanitize hole points
+    raw_pts = params.get("hole_points") or []
+    safe_pts = []
+    margin = hole_dia * 1.5
+    for pt in raw_pts:
+        try:
+            x, y = float(pt[0]), float(pt[1])
+            x = max(-(length/2 - margin), min(length/2 - margin, x))
+
+            y_min = -(width/2 - margin)
+            if part_type == "bracket":
+                y_min = -(width/2) + wall_t + margin
+
+            y = max(y_min, min(width/2 - margin, y))
+            safe_pts.append([round(x,2), round(y,2)])
+        except:
+            continue
+
+    # Default hole pattern if none provided
+    if not safe_pts and has_holes:
+        ox = round(length/2 - hole_dia*2, 2)
+        if part_type == "bracket":
+            # Holes must sit on the flat base plate, avoiding the wall footprint
+            usable_y = width - wall_t
+            y_center = wall_t / 2  # shift forward from origin
+            oy = round(usable_y/2 - hole_dia*1.5, 2)
+            safe_pts = [
+                [ox, y_center + oy],
+                [-ox, y_center + oy],
+                [ox, y_center - oy],
+                [-ox, y_center - oy]
+            ]
+        else:
+            oy = round(width/2 - hole_dia*2, 2)
+            safe_pts = [[ox,oy],[-ox,oy],[ox,-oy],[-ox,-oy]]
+
+    fillet_r = float(params.get("fillet_r") or min(2.0, wall_t * 0.35))
+    fillet_r = min(fillet_r, min_dim * 0.08)
+
+    pocket_w = float(params.get("pocket_w") or length * 0.4)
+    pocket_l = float(params.get("pocket_l") or width * 0.4)
+    pocket_depth = float(params.get("pocket_depth") or height * 0.3)
+    boss_dia = float(params.get("boss_dia") or 10.0)
+    boss_height = float(params.get("boss_height") or 5.0)
+
+    # ── BUILD SCRIPT — only template function calls ──
+    lines = [
+        "import sys",
+        r"sys.path.insert(0, r'H:\DesignOS')",
+        "import cadquery as cq",
+        "from templates import BASE_TEMPLATES, FEATURE_MAP",
+        "",
+        f"# {part_type.upper()} | {length}x{width}x{height}mm",
+        f"length, width, height = {length}, {width}, {height}",
+        f"wall_t = {wall_t}",
+        f"hole_dia = {hole_dia}",
+        f"hole_points = {safe_pts}",
+        f"fillet_r = {fillet_r}",
+        "",
+    ]
+
+    # Base geometry
+    if part_type == "bracket":
+        lines.append(f"result = BASE_TEMPLATES['bracket'](length, width, height, wall_t)")
+    elif part_type == "shaft":
+        lines.append(f"result = BASE_TEMPLATES['shaft'](min(length,width), max(length,width))")
+    elif part_type == "housing":
+        lines.append(f"result = BASE_TEMPLATES['housing'](length, width, height, wall_t)")
+    elif part_type == "channel":
+        lines.append(f"result = BASE_TEMPLATES['channel'](length, width, height, wall_t)")
+    elif part_type == "flange":
+        lines.append(f"result = BASE_TEMPLATES['flange'](length, width, height, wall_t)")
+    elif part_type == "gear":
+        lines.append(f"result = BASE_TEMPLATES['gear'](min(length,width), height)")
+    else:
+        lines.append(f"result = BASE_TEMPLATES['plate'](length, width, height)")
+
+    # Features — strict order: holes → pockets → shell → boss → chamfers → fillets LAST
+    if has_holes and safe_pts:
+        lines.append(f"result = FEATURE_MAP['holes'](result, hole_points, hole_dia)")
+    if has_pockets:
+        lines.append(f"result = FEATURE_MAP['pockets'](result, {pocket_w}, {pocket_l}, {pocket_depth})")
+    if has_boss:
+        lines.append(f"result = FEATURE_MAP['boss'](result, {boss_dia}, {boss_height})")
+    if has_chamfers:
+        lines.append(f"result = FEATURE_MAP['chamfers'](result, 1.0)")
+    if has_fillets:
+        lines.append(f"result = FEATURE_MAP['fillets'](result, fillet_r)")
+
+    lines.append("")
+    lines.append("cq.exporters.export(result, output_path)")
+    
+    return "\n".join(lines)
 
 
 def execute_cadquery(script: str, job_id: str):
@@ -195,8 +304,16 @@ def execute_cadquery(script: str, job_id: str):
     # NOTE: The fallback uses raw strings, NOT f-strings, to avoid
     # Python interpreting braces at app.py compile time.
     header = (
+        'import sys\n'
+        f'sys.path.insert(0, r"H:\\DesignOS")\n'
         f'output_path = r"{step_path}"\n'
         f'stl_output_path = r"{stl_path}"\n'
+        '\n'
+        '# --- DesignOS mock show_object ---\n'
+        '_designos_export_target = None\n'
+        'def show_object(obj, name=None, options=None):\n'
+        '    global _designos_export_target\n'
+        '    _designos_export_target = obj\n'
         '\n'
     )
 
@@ -206,15 +323,26 @@ def execute_cadquery(script: str, job_id: str):
 
 # --- DesignOS auto-appended fallback export ---
 import os as _os
-if "result" in dir():
+import cadquery as _cq
+
+if _designos_export_target is None:
+    if "result" in locals() and isinstance(locals()["result"], (_cq.Workplane, _cq.Shape, _cq.Assembly)):
+        _designos_export_target = locals()["result"]
+    else:
+        for _name, _val in reversed(list(locals().items())):
+            if not _name.startswith("_") and isinstance(_val, (_cq.Workplane, _cq.Shape, _cq.Assembly)):
+                _designos_export_target = _val
+                break
+
+if _designos_export_target is not None:
     try:
         if not _os.path.exists(output_path):
-            cq.exporters.export(result, output_path)
+            _cq.exporters.export(_designos_export_target, output_path)
     except Exception:
         pass
     try:
         if not _os.path.exists(stl_output_path):
-            cq.exporters.export(result, stl_output_path, exportType="STL")
+            _cq.exporters.export(_designos_export_target, stl_output_path, exportType=_cq.exporters.ExportTypes.STL)
     except Exception:
         pass
 '''
@@ -255,57 +383,96 @@ def _log(job_id: str, step: str, status: str, message: str, detail: str = ""):
     jobs[job_id]["log"].append(entry)
 
 
-def run_generation(job_id: str, prompt: str, max_attempts: int = 3):
-    """Full generate pipeline — runs in a background thread."""
+def validate_dimensions(step_path, expected_length, expected_width, expected_height, tolerance=5.0):
+    """Verify output dimensions match input. Returns (valid, actual_dims, error)"""
+    validate_script = f"""
+import cadquery as cq, sys, json
+shape = cq.importers.importStep(r"{step_path}")
+bb = shape.val().BoundingBox()
+dims = {{
+    "length": round(bb.xmax - bb.xmin, 2),
+    "width": round(bb.ymax - bb.ymin, 2),
+    "height": round(bb.zmax - bb.zmin, 2),
+    "volume": round(shape.val().Volume(), 2),
+    "solids": len(shape.solids().vals())
+}}
+print(json.dumps(dims))
+"""
+    script_path = step_path.replace(".step", "_validate.py")
+    with open(script_path, "w") as f:
+        f.write(validate_script)
+    
     try:
-        # Check if this is a refinement job (skip spec generation)
-        is_refinement = "parent_job" in jobs[job_id]
+        proc = subprocess.run([CADQUERY_PYTHON, script_path], capture_output=True, text=True, timeout=30)
+        os.unlink(script_path)
+        dims = json.loads(proc.stdout.strip())
+        
+        # Check against expected with tolerance
+        errors = []
+        if abs(dims["length"] - expected_length) > tolerance:
+            errors.append(f"Length wrong: got {dims['length']}mm, expected {expected_length}mm")
+        if abs(dims["width"] - expected_width) > tolerance:
+            errors.append(f"Width wrong: got {dims['width']}mm, expected {expected_width}mm")
+        if abs(dims["height"] - expected_height) > tolerance:
+            errors.append(f"Height wrong: got {dims['height']}mm, expected {expected_height}mm")
+        if dims["solids"] == 0:
+            errors.append("No solid body — open geometry")
+            
+        return len(errors) == 0, dims, errors
+    except Exception as e:
+        return True, {}, []  # Don't block on validator failure
 
-        if not is_refinement:
-            # ---- Step 0: Refine prompt into engineering spec ----
-            jobs[job_id]["step"] = "refining_prompt"
-            _log(job_id, "refine_prompt", "running", "Refining prompt to engineering spec …")
-            try:
-                spec = refine_prompt(prompt)
-                jobs[job_id]["spec"] = spec
-                _log(job_id, "refine_prompt", "done", "Engineering spec generated", spec)
-                generation_prompt = spec
-            except Exception as exc:
-                _log(job_id, "refine_prompt", "error",
-                     f"Refinement failed: {exc}. Using original prompt.")
-                generation_prompt = prompt
-        else:
-            generation_prompt = prompt
 
-        current_prompt = generation_prompt
+def run_generation(job_id: str, prompt: str, form_data: dict = None, max_attempts: int = 3):
+    """Template-based generation pipeline — runs in a background thread."""
+    form_data = form_data or {}
+    try:
+        # ---- Step 1: Qwen calculates parameters only ----
+        jobs[job_id]["step"] = "calculating_params"
+        jobs[job_id]["attempt"] = 1
+        _log(job_id, "params", "running", "Qwen calculating parameters …")
+
+        spec = build_spec_string(form_data)
+        params = get_params_from_qwen(spec)
+        _log(job_id, "params", "done", f"Parameters calculated", json.dumps(params, indent=2))
+
+        # ---- Step 2: Assemble script from templates (deterministic) ----
+        jobs[job_id]["step"] = "assembling_script"
+        _log(job_id, "assemble", "running", "Assembling geometry from templates …")
+
+        script = assemble_script(form_data, params)
+        jobs[job_id]["script"] = script
+        _log(job_id, "assemble", "done", "Script assembled from templates", script)
+
+        # ---- Step 3: Execute (retry up to max_attempts) ----
         last_error = None
-
         for attempt in range(1, max_attempts + 1):
             jobs[job_id]["attempt"] = attempt
-
-            # ---- Step 1: Generate CadQuery script ----
-            jobs[job_id]["step"] = "generating_script"
-            _log(job_id, "generate", "running",
-                 f"Generating CadQuery script (attempt {attempt}/{max_attempts}) …")
-
-            script = generate_cadquery_script(current_prompt)
-            _log(job_id, "generate", "done", "Script generated", script)
-            jobs[job_id]["script"] = script
-
-            # ---- Step 2: Execute ----
             jobs[job_id]["step"] = "executing"
-            _log(job_id, "execute", "running", "Executing CadQuery script …")
+            _log(job_id, "execute", "running",
+                 f"Executing CadQuery script (attempt {attempt}/{max_attempts}) …")
 
             success, error = execute_cadquery(script, job_id)
 
             if success:
-                _log(job_id, "execute", "done", "STEP + STL files generated successfully")
+                # Validate dimensions
+                step_path = os.path.join(TEMP_DIR, f"{job_id}.step")
+                valid, actual_dims, dim_errors = validate_dimensions(
+                    step_path,
+                    float(form_data.get("length", 100)),
+                    float(form_data.get("width", 60)),
+                    float(form_data.get("height", 20))
+                )
+                if actual_dims:
+                    _log(job_id, "validate", "done", f"Dimensions: {actual_dims}")
+                    jobs[job_id]["actual_dims"] = actual_dims
+
                 jobs[job_id]["status"] = "completed"
                 jobs[job_id]["step"] = "done"
-                step_path = os.path.join(TEMP_DIR, f"{job_id}.step")
                 stl_path = os.path.join(TEMP_DIR, f"{job_id}.stl")
                 jobs[job_id]["step_file"] = step_path
                 jobs[job_id]["stl_file"] = stl_path if os.path.exists(stl_path) else None
+                _log(job_id, "complete", "done", "Model generated successfully")
                 return
 
             last_error = error
@@ -314,22 +481,45 @@ def run_generation(job_id: str, prompt: str, max_attempts: int = 3):
 
             if attempt < max_attempts:
                 jobs[job_id]["step"] = "retrying"
-                _log(job_id, "retry", "running", "Feeding error back to Qwen for retry …")
-                current_prompt = (
-                    f"The previous CadQuery script FAILED with this error:\n"
-                    f"{error}\n\n"
-                    f"The failing script was:\n{script}\n\n"
-                    f"Original specification:\n{generation_prompt}\n\n"
-                    f"Write a CORRECTED CadQuery script. Keep it simple. "
-                    f"Avoid fillets if they caused the error. "
-                    f"Use only basic CadQuery operations."
-                )
+                _log(job_id, "retry", "running", "Retrying with safe defaults …")
+                params = {}  # Reset to safe defaults
+                script = assemble_script(form_data, params)
+                jobs[job_id]["script"] = script
 
         # All attempts exhausted
         jobs[job_id]["status"] = "failed"
         jobs[job_id]["step"] = "failed"
         jobs[job_id]["error"] = last_error
         _log(job_id, "final", "error", f"All {max_attempts} attempts failed")
+
+    except Exception as exc:
+        jobs[job_id]["status"] = "failed"
+        jobs[job_id]["step"] = "failed"
+        jobs[job_id]["error"] = str(exc)
+        _log(job_id, "error", "error", str(exc))
+
+
+def run_manual_script(job_id: str, script: str):
+    """Executes a manually provided CadQuery script directly."""
+    try:
+        jobs[job_id]["step"] = "executing"
+        _log(job_id, "execute", "running", "Executing manual CadQuery script …")
+        
+        success, error = execute_cadquery(script, job_id)
+        
+        if success:
+            _log(job_id, "execute", "done", "STEP + STL files generated successfully")
+            jobs[job_id]["status"] = "completed"
+            jobs[job_id]["step"] = "done"
+            step_path = os.path.join(TEMP_DIR, f"{job_id}.step")
+            stl_path = os.path.join(TEMP_DIR, f"{job_id}.stl")
+            jobs[job_id]["step_file"] = step_path
+            jobs[job_id]["stl_file"] = stl_path if os.path.exists(stl_path) else None
+        else:
+            jobs[job_id]["status"] = "failed"
+            jobs[job_id]["step"] = "failed"
+            jobs[job_id]["error"] = error
+            _log(job_id, "execute", "error", "Execution failed", error)
 
     except Exception as exc:
         jobs[job_id]["status"] = "failed"
@@ -369,12 +559,43 @@ def index():
 @app.route("/generate", methods=["POST"])
 def generate():
     data = request.get_json(force=True)
+    
+    # Accept both simple prompt and structured form data
     prompt = data.get("prompt", "").strip()
+    form_data = {
+        "part_type": data.get("part_type", "Part"),
+        "length": data.get("length", 100),
+        "width": data.get("width", 60),
+        "height": data.get("height", 20),
+        "material": data.get("material", "Steel"),
+        "features": data.get("features", []),
+        "notes": data.get("notes", "")
+    }
+    
+    if not prompt and not any([data.get("part_type"), data.get("length")]):
+        return jsonify({"error": "No prompt or form data provided"}), 400
+
+    # Build prompt from form if no freeform prompt
     if not prompt:
-        return jsonify({"error": "No prompt provided"}), 400
+        prompt = f"{form_data['part_type']} {form_data['length']}x{form_data['width']}x{form_data['height']}mm {form_data['material']}"
 
     job_id = _new_job(prompt)
-    t = threading.Thread(target=run_generation, args=(job_id, prompt), daemon=True)
+    jobs[job_id]["form_data"] = form_data
+    t = threading.Thread(target=run_generation, args=(job_id, prompt, form_data), daemon=True)
+    t.start()
+    return jsonify({"job_id": job_id})
+
+
+@app.route("/execute_raw_script", methods=["POST"])
+def execute_raw_script():
+    data = request.get_json(force=True)
+    script = data.get("script", "").strip()
+    if not script:
+        return jsonify({"error": "No script provided"}), 400
+
+    job_id = _new_job("Manual Script Execution")
+    jobs[job_id]["script"] = script
+    t = threading.Thread(target=run_manual_script, args=(job_id, script), daemon=True)
     t.start()
     return jsonify({"job_id": job_id})
 
@@ -491,7 +712,12 @@ def refine():
 
     job_id = _new_job(instruction)
     jobs[job_id]["parent_job"] = original_job_id
-    t = threading.Thread(target=run_generation, args=(job_id, refine_text), daemon=True)
+    # Carry form_data from the original job for template assembly
+    original_form = jobs[original_job_id].get("form_data", {})
+    # Merge the refine instruction into notes
+    original_form["notes"] = instruction
+    jobs[job_id]["form_data"] = original_form
+    t = threading.Thread(target=run_generation, args=(job_id, instruction, original_form), daemon=True)
     t.start()
     return jsonify({"job_id": job_id})
 

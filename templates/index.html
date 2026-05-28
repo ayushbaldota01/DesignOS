@@ -145,6 +145,64 @@
       display: flex;
       flex-direction: column;
     }
+    
+    /* Sidebar Tabs */
+    .sidebar-tabs {
+      display: flex;
+      border-bottom: 1px solid var(--border);
+      background: var(--bg-secondary);
+      flex-shrink: 0;
+    }
+    .tab-btn {
+      flex: 1;
+      padding: 12px 0;
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      transition: all 0.2s;
+    }
+    .tab-btn:hover {
+      color: var(--text-secondary);
+    }
+    .tab-btn.active {
+      color: var(--text-accent);
+      border-bottom-color: var(--text-accent);
+    }
+    
+    #ai-panel {
+      flex: 1;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+    }
+    
+    #editor-panel {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    
+    #script-editor {
+      flex: 1;
+      width: 100%;
+      resize: none;
+      background: var(--bg-input);
+      color: var(--text-primary);
+      border: none;
+      padding: 14px;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      line-height: 1.5;
+      outline: none;
+      white-space: pre;
+    }
 
     .panel-section {
       padding: 16px 18px;
@@ -492,8 +550,15 @@
   <!-- ==================== SIDEBAR ==================== -->
   <aside id="sidebar">
 
-    <!-- Part type -->
-    <div class="panel-section">
+    <!-- Tabs -->
+    <div class="sidebar-tabs">
+      <button class="tab-btn active" id="tab-ai">AI Config</button>
+      <button class="tab-btn" id="tab-editor">Script Editor</button>
+    </div>
+
+    <div id="ai-panel">
+      <!-- Part type -->
+      <div class="panel-section">
       <h2>Part Definition</h2>
       <label for="part-type">Part Type</label>
       <select id="part-type">
@@ -566,12 +631,24 @@
       <button class="btn-secondary" id="btn-clear">CLEAR</button>
     </div>
 
-    <!-- Refine (shown after successful generation) -->
-    <div id="refine-section">
-      <h2 style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:1.4px;color:var(--text-muted);margin-bottom:8px;">Refine Design</h2>
-      <div class="refine-row">
-        <input type="text" id="refine-input" placeholder="e.g. Make holes larger" />
-        <button id="btn-refine">REFINE</button>
+      <!-- Refine (shown after successful generation) -->
+      <div id="refine-section">
+        <h2 style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:1.4px;color:var(--text-muted);margin-bottom:8px;">Refine Design</h2>
+        <div class="refine-row">
+          <input type="text" id="refine-input" placeholder="e.g. Make holes larger" />
+          <button id="btn-refine">REFINE</button>
+        </div>
+      </div>
+    </div> <!-- End ai-panel -->
+
+    <!-- Editor Panel -->
+    <div id="editor-panel" style="display: none;">
+      <textarea id="script-editor" spellcheck="false" placeholder="import cadquery as cq
+
+# Your code here...
+result = cq.Workplane('XY').box(50, 50, 50)"></textarea>
+      <div class="panel-section" style="border-top: 1px solid var(--border); flex-shrink: 0;">
+        <button class="btn-primary" id="btn-execute-script">▶&ensp;EXECUTE SCRIPT</button>
       </div>
     </div>
 
@@ -642,6 +719,14 @@ const logEntries    = document.getElementById("log-entries");
 const emptyState    = document.getElementById("empty-state");
 const viewerToolbar = document.getElementById("viewer-toolbar");
 
+// Editor UI
+const tabAi         = document.getElementById("tab-ai");
+const tabEditor     = document.getElementById("tab-editor");
+const aiPanel       = document.getElementById("ai-panel");
+const editorPanel   = document.getElementById("editor-panel");
+const scriptEditor  = document.getElementById("script-editor");
+const btnExecute    = document.getElementById("btn-execute-script");
+
 // ----- State -----
 let viewer = null;
 let currentJobId = null;
@@ -652,6 +737,32 @@ let wireframeOn = false;
 // Module scripts are deferred, so DOM is ready by the time this runs.
 viewer = new CADViewer("viewer-canvas");
 checkHealth();
+
+// ----- Tab Switching -----
+tabAi.addEventListener("click", () => {
+  tabAi.classList.add("active");
+  tabEditor.classList.remove("active");
+  aiPanel.style.display = "flex";
+  editorPanel.style.display = "none";
+});
+
+tabEditor.addEventListener("click", () => {
+  tabEditor.classList.add("active");
+  tabAi.classList.remove("active");
+  editorPanel.style.display = "flex";
+  aiPanel.style.display = "none";
+});
+
+// ----- Editor Behaviors -----
+scriptEditor.addEventListener("keydown", (e) => {
+  if (e.key === "Tab") {
+    e.preventDefault();
+    const start = scriptEditor.selectionStart;
+    const end = scriptEditor.selectionEnd;
+    scriptEditor.value = scriptEditor.value.substring(0, start) + "    " + scriptEditor.value.substring(end);
+    scriptEditor.selectionStart = scriptEditor.selectionEnd = start + 4;
+  }
+});
 
 // ----- Health Check -----
 async function checkHealth() {
@@ -702,8 +813,21 @@ function buildPrompt() {
 
 // ----- Generate -----
 btnGenerate.addEventListener("click", async () => {
-  const prompt = buildPrompt();
-  if (!prompt) return;
+  const partType = document.getElementById("part-type").value;
+  const length = document.getElementById("dim-l").value || 100;
+  const width = document.getElementById("dim-w").value || 60;
+  const height = document.getElementById("dim-h").value || 20;
+  const material = document.getElementById("material").value;
+  const notesElement = document.getElementById("notes");
+  const notes = notesElement ? notesElement.value.trim() : "";
+
+  const selectedFeatures = [];
+  if (document.getElementById("feat-holes").checked)    selectedFeatures.push("mounting holes");
+  if (document.getElementById("feat-fillets").checked)  selectedFeatures.push("filleted edges");
+  if (document.getElementById("feat-chamfers").checked) selectedFeatures.push("chamfered edges");
+  if (document.getElementById("feat-pockets").checked)  selectedFeatures.push("pockets / cutouts");
+  if (document.getElementById("feat-shell").checked)    selectedFeatures.push("hollow shell");
+  if (document.getElementById("feat-boss").checked)     selectedFeatures.push("bosses / standoffs");
 
   btnGenerate.disabled = true;
   btnDownload.style.display = "none";
@@ -720,7 +844,16 @@ btnGenerate.addEventListener("click", async () => {
     const r = await fetch("/generate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ prompt }),
+      body: JSON.stringify({
+        prompt: notes || "",
+        part_type: partType,
+        length: parseFloat(length),
+        width: parseFloat(width),
+        height: parseFloat(height),
+        material: material,
+        features: selectedFeatures,
+        notes: notes
+      }),
     });
     const d = await r.json();
     if (d.error) { showError(d.error); return; }
@@ -731,7 +864,39 @@ btnGenerate.addEventListener("click", async () => {
   }
 });
 
-// ----- Polling -----
+// ----- Execute Manual Script -----
+btnExecute.addEventListener("click", async () => {
+  const script = scriptEditor.value.trim();
+  if (!script) return;
+
+  btnExecute.disabled = true;
+  btnDownload.style.display = "none";
+  refineSection.classList.remove("visible");
+  logEntries.innerHTML = "";
+  emptyState.style.display = "none";
+  statusBar.classList.add("visible");
+  statusText.textContent = "Executing script …";
+  attemptBadge.textContent = "Manual";
+
+  if (viewer) viewer.clear();
+
+  try {
+    const r = await fetch("/execute_raw_script", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ script }),
+    });
+    const d = await r.json();
+    if (d.error) { showError(d.error); btnExecute.disabled = false; return; }
+    currentJobId = d.job_id;
+    startPolling();
+  } catch (e) {
+    showError("Failed to reach backend: " + e.message);
+    btnExecute.disabled = false;
+  }
+});
+
+// ----- Refine -----
 function startPolling() {
   if (pollTimer) clearInterval(pollTimer);
   pollTimer = setInterval(() => pollStatus(), 800);
@@ -754,13 +919,12 @@ async function pollStatus() {
 
     // Update status bar
     const stepLabels = {
-      refining_prompt:  "Refining prompt …",
-      generating_script: "Generating CadQuery script …",
-      validating:       "Validating with Qwen …",
-      executing:        "Executing CadQuery …",
-      retrying:         "Retrying generation …",
-      done:             "Complete",
-      failed:           "Generation failed",
+      calculating_params: "Calculating parameters …",
+      assembling_script:  "Assembling from templates …",
+      executing:          "Executing CadQuery …",
+      retrying:           "Retrying with safe defaults …",
+      done:               "Complete",
+      failed:             "Generation failed",
     };
     statusText.textContent = stepLabels[d.step] || d.step;
     attemptBadge.textContent = `${d.attempt} / ${d.max_attempts}`;
@@ -779,6 +943,7 @@ async function pollStatus() {
       pollTimer = null;
       statusBar.classList.remove("visible");
       btnGenerate.disabled = false;
+      btnExecute.disabled = false;
       btnDownload.style.display = "inline-block";
       refineSection.classList.add("visible");
       viewerToolbar.style.display = "flex";
@@ -798,6 +963,7 @@ async function pollStatus() {
       pollTimer = null;
       statusBar.classList.remove("visible");
       btnGenerate.disabled = false;
+      btnExecute.disabled = false;
       showError(d.error || "Generation failed after all retries.");
     }
   } catch { /* keep polling */ }
@@ -822,6 +988,7 @@ function appendLog(entry) {
 function showError(msg) {
   statusBar.classList.remove("visible");
   btnGenerate.disabled = false;
+  btnExecute.disabled = false;
   appendLog({ status: "error", message: msg });
 }
 
