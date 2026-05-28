@@ -789,6 +789,38 @@ function setDot(id, ok) {
   el.classList.toggle("fail", !ok);
 }
 
+// ----- Dynamic UI Updates -----
+const partTypeSelect = document.getElementById("part-type");
+const labelL = document.querySelector('label[for="dim-l"]');
+const labelW = document.querySelector('label[for="dim-w"]');
+const labelH = document.querySelector('label[for="dim-h"]');
+const containerW = labelW.parentElement;
+const containerH = labelH.parentElement;
+
+partTypeSelect.addEventListener("change", () => {
+  const t = partTypeSelect.value;
+  containerW.style.display = "block";
+  containerH.style.display = "block";
+  labelL.textContent = "Length";
+  labelW.textContent = "Width";
+  labelH.textContent = "Height";
+
+  if (t === "Shaft") {
+    labelL.textContent = "Total Length";
+    labelW.textContent = "Stage 1 Dia.";
+    labelH.textContent = "Stage 2 Dia.";
+  } else if (t === "Gear") {
+    labelL.textContent = "Diameter";
+    containerW.style.display = "none";
+    labelH.textContent = "Thickness";
+  } else if (t === "Bracket") {
+    labelL.textContent = "Base Length";
+    labelW.textContent = "Width";
+    labelH.textContent = "Height";
+  }
+});
+partTypeSelect.dispatchEvent(new Event('change'));
+
 // ----- Build prompt from form -----
 function buildPrompt() {
   const type = document.getElementById("part-type").value;
