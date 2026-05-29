@@ -829,7 +829,8 @@ Rules:
 - Keep output_path variable unchanged — never hardcode a path
 - Keep all # mm comments on dimension variables
 - Use valid CadQuery string selectors for faces (e.g. '>Z', '<Y', '>X'). NEVER use '@Y' or '@X' as they are invalid.
-- Operations order: base → holes → pocket → fillets LAST
+- Operations order: base → additions (gears, flanges, bosses) → holes → pocket → fillets LAST
+- When adding features (e.g., gears, flanges), use standard primitives (.circle().extrude()) and .union() them to the main body.
 - No markdown, no explanation, pure Python only"""
 
     raw = call_ollama(QWEN_MODEL, ASSIST_PROMPT, "")

@@ -716,6 +716,17 @@ result = cq.Workplane('XY').box(50, 50, 50)"></textarea>
     <div class="slider-panel" id="sliderPanel">
       <div class="panel-title">PARAMETERS</div>
       <div id="slidersContainer"></div>
+      
+      <div class="component-library">
+          <div class="panel-title">ADD FEATURE</div>
+          <div class="library-grid">
+              <button onclick="addFeature('gear')">⚙️ Gear</button>
+              <button onclick="addFeature('flange')">🔩 Flange</button>
+              <button onclick="addFeature('hole_pattern')">🕳️ Holes</button>
+              <button onclick="addFeature('pocket')">🟩 Pocket</button>
+          </div>
+      </div>
+
       <button class="btn-back" id="backBtn">← New Part</button>
       <div class="history-panel">
           <div class="panel-title">HISTORY</div>
@@ -1407,6 +1418,9 @@ window.onGeometryClick = function(hit) {
     } else if (normal.z > 0.8) {
         title = "TOP FACE";
         fields = { "length_mm": size.x.toFixed(1), "width_mm": size.y.toFixed(1) };
+    } else if (Math.abs(size.x - size.y) < 0.5 && size.z >= size.x) {
+        title = "CYLINDER WALL";
+        fields = { "diameter_mm": size.x.toFixed(1), "height_mm": size.z.toFixed(1) };
     } else {
         title = "WALL";
         fields = { "thickness_mm": Math.min(size.x, size.y).toFixed(1), "height_mm": size.z.toFixed(1) };
@@ -1437,6 +1451,19 @@ window.applyGeometryEdit = async function() {
 
 window.closeEditPanel = function() {
     document.getElementById('editPanel').style.display = 'none';
+}
+
+window.addFeature = async function(type) {
+    const prompts = {
+        'gear': 'Add a gear feature to the top face.',
+        'flange': 'Add a flange to the base.',
+        'hole_pattern': 'Add a circular pattern of 4 clearance holes on the top face.',
+        'pocket': 'Add a central rectangular pocket to the top face.'
+    };
+    const instruction = prompts[type];
+    if (!instruction) return;
+    document.getElementById('aiInput').value = instruction;
+    await triggerAI();
 }
 
 </script>
