@@ -109,3 +109,56 @@ input[type=range] { width: 100%; accent-color: var(--accent); }
 .library-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .library-grid button { background: #1a1e24; border: 1px solid var(--border); color: var(--text-dim); padding: 8px; border-radius: 4px; cursor: pointer; transition: all 0.2s; font-size: 11px; text-align: left; }
 .library-grid button:hover { background: #2a2e34; color: var(--text); border-color: var(--accent); }
+
+/* ═══ CANVAS MODE ═══ */
+
+/* Canvas header */
+.canvas-header { height: 48px; border-bottom: 1px solid var(--border); display: flex; align-items: center; padding: 0 16px; gap: 16px; background: var(--panel); flex-shrink: 0; }
+.canvas-title { color: var(--accent); font-weight: 700; font-size: 12px; letter-spacing: 2px; }
+.canvas-session { font-size: 10px; color: var(--text-dim); }
+.canvas-status { font-size: 11px; color: var(--text-dim); min-width: 100px; }
+.canvas-status.done { color: var(--success); }
+.canvas-status.error { color: var(--error); }
+.canvas-status.running { color: var(--accent); }
+.canvas-header-right { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+
+/* Canvas 3-column layout */
+.canvas-layout { flex: 1; display: grid; grid-template-columns: 160px 1fr 220px; overflow: hidden; }
+
+/* Left sidebar: add geometry */
+.add-geometry-sidebar { background: var(--panel); border-right: 1px solid var(--border); padding: 12px; overflow-y: auto; }
+.block-group-title { font-size: 9px; color: var(--text-dim); letter-spacing: 2px; margin: 12px 0 6px; }
+.block-btn { padding: 8px 10px; border: 1px solid var(--border); margin-bottom: 4px; cursor: pointer; font-size: 11px; color: var(--text); font-family: var(--mono); transition: all 0.15s; }
+.block-btn:hover { border-color: var(--accent); color: var(--accent); background: rgba(0,212,255,0.05); }
+.face-select-row { margin-top: 16px; border-top: 1px solid var(--border); padding-top: 12px; }
+.face-select { width: 100%; background: var(--bg); border: 1px solid var(--border); color: var(--text); padding: 6px; font-family: var(--mono); font-size: 11px; }
+
+/* Center: viewer */
+.canvas-viewer-panel { position: relative; background: var(--bg); overflow: hidden; }
+
+/* Right sidebar */
+.right-sidebar { background: var(--panel); border-left: 1px solid var(--border); padding: 12px; overflow-y: auto; display: flex; flex-direction: column; gap: 16px; }
+
+/* Param panel */
+.param-panel-title { font-size: 10px; color: var(--accent); letter-spacing: 1px; margin-bottom: 12px; font-weight: 600; }
+.param-panel-empty { font-size: 11px; color: var(--text-dim); text-align: center; padding: 20px 0; }
+.param-input-row { display: flex; align-items: center; gap: 4px; }
+.param-input-row input { flex: 1; background: var(--bg); border: 1px solid var(--border); color: var(--text); padding: 5px 8px; font-family: var(--mono); font-size: 12px; }
+.param-input-row input:focus { outline: none; border-color: var(--accent); }
+.mount-face-row { margin-top: 12px; border-top: 1px solid var(--border); padding-top: 12px; }
+.mount-face-row label { display: block; font-size: 10px; color: var(--text-dim); margin-bottom: 4px; }
+.face-badge { font-size: 11px; color: var(--accent); background: rgba(0,212,255,0.1); padding: 4px 8px; border: 1px solid var(--accent); display: inline-block; }
+
+/* Assembly tree */
+.assembly-tree { border-top: 1px solid var(--border); padding-top: 12px; }
+.tree-item { padding: 6px 8px; cursor: pointer; font-size: 11px; display: flex; align-items: center; gap: 8px; border: 1px solid transparent; margin-bottom: 2px; font-family: var(--mono); transition: all 0.15s; }
+.tree-item:hover { border-color: var(--border); }
+.tree-item.selected { border-color: var(--accent); color: var(--accent); background: rgba(0,212,255,0.05); }
+.tree-item.tree-child { padding-left: 20px; }
+.tree-icon { color: var(--accent); font-size: 13px; }
+.tree-label { flex: 1; }
+.tree-empty { font-size: 11px; color: var(--text-dim); text-align: center; padding: 12px 0; }
+
+/* Script panel */
+.canvas-script-panel { border-top: 1px solid var(--border); background: #1a1e24; max-height: 200px; display: flex; flex-direction: column; flex-shrink: 0; }
+.canvas-script-view { flex: 1; overflow: auto; padding: 8px 16px; font-family: var(--mono); font-size: 11px; color: var(--text); white-space: pre; margin: 0; line-height: 1.5; }

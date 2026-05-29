@@ -15,6 +15,7 @@ import subprocess
 from flask import Flask, request, jsonify, send_file, render_template, Response
 from flask_cors import CORS
 import requests as http_requests
+from block_engine import parse_blocks, update_block_param, add_block_to_script, assemble_block_script
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -839,6 +840,169 @@ Rules:
     if not safe:
         return jsonify({"error": f"AI generated unsafe script: {reason}"}), 400
     return jsonify({"script": script})
+
+# ---------------------------------------------------------------------------
+# Canvas — Block-based assembly endpoints
+# ---------------------------------------------------------------------------
+
+canvas_sessions = {}
+
+@app.route("/canvas/session", methods=["POST"])
+def create_canvas_session():
+    """Initialize canvas session from form data."""
+    data = request.get_json(force=True)
+    session_id = uuid.uuid4().hex[:8]
+
+    form_data = data.get("form_data", {})
+    source_job = data.get("source_job", "")
+
+    # Get params from Qwen
+    spec = build_spec_string(form_data)
+    params = get_params_from_qwen(spec)
+
+    # Build tagged block script
+    script = assemble_block_script(form_data, params)
+
+    canvas_sessions[session_id] = {
+        "script": script,
+        "history": [script],
+        "history_index": 0,
+        "form_data": form_data,
+    }
+
+    # Execute
+    job_id = _new_job(f"canvas_{session_id}")
+    jobs[job_id]["script"] = script
+    threading.Thread(
+        target=lambda: _run_canvas_job(job_id, script),
+        daemon=True
+    ).start()
+
+    return jsonify({"session_id": session_id, "job_id": job_id})
+
+
+@app.route("/canvas/blocks/<session_id>")
+def get_canvas_blocks(session_id):
+    """Return parsed blocks for the UI parameter panels."""
+    session = canvas_sessions.get(session_id)
+    if not session:
+        return jsonify({"error": "Session not found"}), 404
+    blocks = parse_blocks(session["script"])
+    return jsonify({"blocks": blocks, "script": session["script"]})
+
+
+@app.route("/canvas/update-param", methods=["POST"])
+def canvas_update_param():
+    """Update single parameter in single block — no Qwen."""
+    data = request.get_json(force=True)
+    session_id = data["session_id"]
+    block_id = data["block_id"]
+    param_key = data["param_key"]
+    new_value = data["new_value"]
+
+    session = canvas_sessions.get(session_id)
+    if not session:
+        return jsonify({"error": "Session not found"}), 404
+
+    new_script = update_block_param(
+        session["script"], block_id, param_key, new_value
+    )
+
+    # Save to history
+    session["history"] = session["history"][:session["history_index"] + 1]
+    session["history"].append(new_script)
+    session["history_index"] += 1
+    session["script"] = new_script
+
+    # Execute
+    job_id = _new_job(f"{session_id}_update")
+    jobs[job_id]["script"] = new_script
+    threading.Thread(
+        target=lambda: _run_canvas_job(job_id, new_script),
+        daemon=True
+    ).start()
+
+    return jsonify({"job_id": job_id})
+
+
+@app.route("/canvas/add-block", methods=["POST"])
+def canvas_add_block():
+    """Add new geometry block to existing assembly."""
+    data = request.get_json(force=True)
+    session_id = data["session_id"]
+    block_type = data["block_type"]
+    params = data.get("params", {})
+    parent_id = data.get("parent_id", "001")
+    face_selector = data.get("face", ">Z")
+
+    session = canvas_sessions.get(session_id)
+    if not session:
+        return jsonify({"error": "Session not found"}), 404
+
+    new_script = add_block_to_script(
+        session["script"], block_type, params, parent_id, face_selector
+    )
+
+    # Save history
+    session["history"] = session["history"][:session["history_index"] + 1]
+    session["history"].append(new_script)
+    session["history_index"] += 1
+    session["script"] = new_script
+
+    # Execute
+    job_id = _new_job(f"{session_id}_add")
+    jobs[job_id]["script"] = new_script
+    threading.Thread(
+        target=lambda: _run_canvas_job(job_id, new_script),
+        daemon=True
+    ).start()
+
+    return jsonify({"job_id": job_id})
+
+
+@app.route("/canvas/undo/<session_id>", methods=["POST"])
+def canvas_undo(session_id):
+    """Undo the last canvas operation."""
+    session = canvas_sessions.get(session_id)
+    if not session or session["history_index"] <= 0:
+        return jsonify({"error": "Nothing to undo"}), 400
+
+    session["history_index"] -= 1
+    session["script"] = session["history"][session["history_index"]]
+
+    job_id = _new_job(f"{session_id}_undo")
+    jobs[job_id]["script"] = session["script"]
+    threading.Thread(
+        target=lambda: _run_canvas_job(job_id, session["script"]),
+        daemon=True
+    ).start()
+
+    return jsonify({"job_id": job_id})
+
+
+def _run_canvas_job(job_id, script):
+    """Execute a canvas script in background."""
+    _log(job_id, "execute", "running", "Executing canvas script...")
+    safe, reason = validate_script_safety(script)
+    if not safe:
+        jobs[job_id]["status"] = "failed"
+        jobs[job_id]["error"] = f"Script rejected: {reason}"
+        _log(job_id, "execute", "error", f"Script rejected: {reason}")
+        return
+    success, error = execute_cadquery(script, job_id)
+    if success:
+        jobs[job_id]["status"] = "completed"
+        jobs[job_id]["step"] = "done"
+        jobs[job_id]["step_file"] = os.path.join(TEMP_DIR, f"{job_id}.step")
+        stl_path = os.path.join(TEMP_DIR, f"{job_id}.stl")
+        jobs[job_id]["stl_file"] = stl_path if os.path.exists(stl_path) else None
+        _log(job_id, "complete", "done", "Canvas model updated")
+    else:
+        jobs[job_id]["status"] = "failed"
+        jobs[job_id]["step"] = "failed"
+        jobs[job_id]["error"] = error
+        _log(job_id, "execute", "error", "Execution failed", error)
+
 
 # ---------------------------------------------------------------------------
 

@@ -769,6 +769,80 @@ result = cq.Workplane('XY').box(50, 50, 50)"></textarea>
   </div>
 </div>
 
+<!-- STAGE 3: CANVAS MODE -->
+<div id="canvasStage" class="stage" style="display:none; grid-column: 1 / -1; width: 100%; flex-direction: column;">
+  <div class="canvas-header">
+    <span class="canvas-title">CANVAS</span>
+    <span class="canvas-session">session: <span id="canvasSessionId">—</span></span>
+    <span id="canvasStatus" class="canvas-status">Ready</span>
+    <div class="canvas-header-right">
+      <button class="btn-secondary" onclick="undoCanvas()">↩ Undo</button>
+      <button class="btn-secondary" onclick="toggleCanvasScript()">Script ↗</button>
+      <button class="btn-assist" onclick="exportCanvasSTEP()">↓ Export STEP</button>
+      <button class="btn-back" onclick="canvasBackToForm()" style="width:auto;margin:0">← New Part</button>
+    </div>
+  </div>
+  <div class="canvas-layout">
+    <!-- Left: Add Geometry Sidebar -->
+    <div class="add-geometry-sidebar">
+      <div class="panel-title">ADD GEOMETRY</div>
+
+      <div class="block-group-title">STRUCTURAL</div>
+      <div class="block-btn" onclick="addGeometry('bracket')">L Bracket</div>
+      <div class="block-btn" onclick="addGeometry('plate')">□ Plate</div>
+      <div class="block-btn" onclick="addGeometry('channel')">U Channel</div>
+      <div class="block-btn" onclick="addGeometry('i_beam')">I Beam</div>
+      <div class="block-btn" onclick="addGeometry('flange')">◎ Flange</div>
+
+      <div class="block-group-title">FEATURES</div>
+      <div class="block-btn" onclick="addGeometry('holes')">○ Holes</div>
+      <div class="block-btn" onclick="addGeometry('fillets')">⌒ Fillet</div>
+      <div class="block-btn" onclick="addGeometry('chamfers')">/ Chamfer</div>
+      <div class="block-btn" onclick="addGeometry('pockets')">▽ Pocket</div>
+      <div class="block-btn" onclick="addGeometry('boss')">⬆ Boss</div>
+
+      <div class="block-group-title">ROTATIONAL</div>
+      <div class="block-btn" onclick="addGeometry('shaft')">| Shaft</div>
+      <div class="block-btn" onclick="addGeometry('gear')">⚙ Gear</div>
+
+      <div class="face-select-row">
+        <div class="panel-title">MOUNT ON</div>
+        <select id="canvasFaceSelector" class="face-select">
+          <option value=">Z">Top face (>Z)</option>
+          <option value="<Z">Bottom face (<Z)</option>
+          <option value=">Y">Front face (>Y)</option>
+          <option value="<Y">Back face (<Y)</option>
+          <option value=">X">Right face (>X)</option>
+          <option value="<X">Left face (<X)</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- Center: 3D Viewer -->
+    <div class="canvas-viewer-panel">
+      <div id="canvasViewerContainer" style="width:100%;height:100%;"></div>
+    </div>
+
+    <!-- Right: Params + Assembly Tree -->
+    <div class="right-sidebar">
+      <div id="paramPanel" class="param-panel">
+        <div class="param-panel-empty">Click a block in the assembly tree to edit its parameters</div>
+      </div>
+
+      <div class="assembly-tree">
+        <div class="panel-title">ASSEMBLY</div>
+        <div id="assemblyTree"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Script panel (hidden by default) -->
+  <div id="canvasScriptPanel" class="canvas-script-panel" style="display:none">
+    <div class="panel-title" style="padding:12px 16px">LIVE SCRIPT</div>
+    <pre id="canvasScriptView" class="canvas-script-view"></pre>
+  </div>
+</div>
+
 </div> <!-- end #app -->
 
 
@@ -973,7 +1047,6 @@ btnGenerate.addEventListener("click", async () => {
       }
       onGenerationComplete(d.job_id, sseData.script || '');
     });
-    startPolling();
   } catch (e) {
     showError("Failed to reach backend: " + e.message);
   }
@@ -1117,23 +1190,27 @@ window.onGenerationComplete = function(jobId, script) {
     window.currentScript = script;
     window.currentJobId = jobId;
     
-    document.getElementById('formStage').style.display = 'none';
-    document.getElementById('editStage').style.display = 'flex';
-    document.getElementById('modeIndicator').textContent = 'EDIT MODE';
-    document.getElementById('toggleScript').style.display = 'block';
+    // Collect form data for canvas session
+    const formData = {
+        part_type: document.getElementById('part-type')?.value || 'plate',
+        length: parseFloat(document.getElementById('dim-l')?.value) || 100,
+        width: parseFloat(document.getElementById('dim-w')?.value) || 60,
+        height: parseFloat(document.getElementById('dim-h')?.value) || 20,
+        material: document.getElementById('material')?.value || 'Steel',
+        features: [],
+        notes: document.getElementById('notes')?.value || ''
+    };
+    // Collect features
+    if (document.getElementById('feat-holes')?.checked) formData.features.push('mounting holes');
+    if (document.getElementById('feat-fillets')?.checked) formData.features.push('filleted edges');
+    if (document.getElementById('feat-chamfers')?.checked) formData.features.push('chamfered edges');
+    if (document.getElementById('feat-pockets')?.checked) formData.features.push('pockets / cutouts');
+    if (document.getElementById('feat-shell')?.checked) formData.features.push('hollow shell');
+    if (document.getElementById('feat-boss')?.checked) formData.features.push('bosses / standoffs');
     
-    // Create new viewer inside editStage if not exists
-    if (!window.viewerInstance) {
-        window.viewerInstance = new CADViewer("viewerCanvas");
-    }
-    window.viewerInstance.loadSTL(`/model/${jobId}`);
-    
-    if (typeof parseSliders === 'function') {
-        const params = parseSliders(script);
-        buildSliders(params, onSliderChange);
-    }
-    if (typeof initMonaco === 'function') {
-        initMonaco(script);
+    // Launch canvas mode
+    if (typeof initCanvas === 'function') {
+        initCanvas(formData);
     }
 }
 
@@ -1467,6 +1544,7 @@ window.addFeature = async function(type) {
 }
 
 </script>
+<script src="/static/canvas.js"></script>
 <script src="/static/sliders.js"></script>
 <script src="/static/editor.js"></script>
 </body>
