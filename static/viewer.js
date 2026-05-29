@@ -16,6 +16,9 @@ const COLORS = {
   ambient: 0xc8d0e0,
 };
 
+let measureMode = false;
+
+
 export class CADViewer {
   constructor(containerId) {
     this.container = document.getElementById(containerId);
@@ -191,52 +194,85 @@ export class CADViewer {
 const raycaster = new THREE.Raycaster();
 const mouse = new THREE.Vector2();
 
+function getRaycastHit(e, viewerCanvas) {
+    const model = window.viewerInstance ? window.viewerInstance.currentModel : window.currentModel;
+    if (!model) return null;
+    
+    const rect = viewerCanvas.getBoundingClientRect();
+    mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+    mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+    
+    const camera = window.viewerInstance ? window.viewerInstance.camera : null;
+    if (!camera) return null;
+    
+    raycaster.setFromCamera(mouse, camera);
+    const intersects = raycaster.intersectObject(model, true);
+    return intersects.length > 0 ? intersects[0] : null;
+}
+
+function showMeasurementLabel(x, y, text) {
+    document.querySelectorAll('.measure-label').forEach(el => el.remove());
+    const label = document.createElement('div');
+    label.className = 'measure-label';
+    label.textContent = text;
+    label.style.cssText = `position:fixed;left:${x}px;top:${y-30}px;background:#000;border:1px solid #00d4ff;color:#00d4ff;padding:4px 8px;font-size:11px;font-family:monospace;pointer-events:none;z-index:999;`;
+    document.body.appendChild(label);
+    setTimeout(() => label.remove(), 3000);
+}
+
 document.addEventListener('DOMContentLoaded', () => {
   const viewerCanvas = document.getElementById('viewerCanvas');
   if (!viewerCanvas) return;
+  
+  const measureToggle = document.getElementById('measureToggle');
+  if (measureToggle) {
+      measureToggle.addEventListener('click', () => {
+          measureMode = !measureMode;
+          measureToggle.classList.toggle('active', measureMode);
+          viewerCanvas.style.cursor = measureMode ? 'crosshair' : 'default';
+      });
+  }
+
   viewerCanvas.addEventListener('click', (e) => {
-      // In the new layout, window.viewerInstance.currentModel holds the mesh
-      const model = window.viewerInstance ? window.viewerInstance.currentModel : window.currentModel;
-      if (!model) return;
-      
-      const rect = viewerCanvas.getBoundingClientRect();
-      mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
-      mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
-      
-      // Need camera from viewer
-      const camera = window.viewerInstance ? window.viewerInstance.camera : null;
-      if (!camera) return;
-      
-      raycaster.setFromCamera(mouse, camera);
-      const intersects = raycaster.intersectObject(model, true);
-      
-      if (intersects.length > 0) {
-          const hit = intersects[0];
-          const normal = hit.face.normal.clone().transformDirection(hit.object.matrixWorld);
-          
-          let faceLabel = "FACE";
-          let cqSelector = "'>Z'";
-          if (normal.z > 0.8) { faceLabel = "TOP FACE"; cqSelector = "'>Z'"; }
-          else if (normal.z < -0.8) { faceLabel = "BOTTOM FACE"; cqSelector = "'<Z'"; }
-          else if (normal.x > 0.8) { faceLabel = "SIDE FACE (+X)"; cqSelector = "'>X'"; }
-          else if (normal.x < -0.8) { faceLabel = "SIDE FACE (-X)"; cqSelector = "'<X'"; }
-          else if (normal.y > 0.8) { faceLabel = "SIDE FACE (+Y)"; cqSelector = "'>Y'"; }
-          else if (normal.y < -0.8) { faceLabel = "SIDE FACE (-Y)"; cqSelector = "'<Y'"; }
-          
-          window.clickedFaceNormal = { x: normal.x, y: normal.y, z: normal.z };
-          window.clickedFaceLabel = `${faceLabel} (recommended CadQuery selector: ${cqSelector})`;
-          
-          const popup = document.getElementById('facePopup');
-          if (popup) {
-              document.getElementById('popupTitle').textContent = faceLabel;
-              popup.style.display = 'block';
-              popup.style.left = e.clientX + 'px';
-              popup.style.top = e.clientY + 'px';
-          }
-          
-          const originalEmissive = hit.object.material.emissive.clone();
-          hit.object.material.emissive = new THREE.Color(0x003344);
-          setTimeout(() => { if (hit.object) hit.object.material.emissive = originalEmissive; }, 1000);
+      const hit = getRaycastHit(e, viewerCanvas);
+      if (!hit) return;
+
+      if (measureMode) {
+          const bbox = new THREE.Box3().setFromObject(hit.object);
+          const size = new THREE.Vector3();
+          bbox.getSize(size);
+          showMeasurementLabel(e.clientX, e.clientY, `${size.x.toFixed(1)} × ${size.y.toFixed(1)} × ${size.z.toFixed(1)} mm`);
+          return;
       }
+      
+      const normal = hit.face.normal.clone().transformDirection(hit.object.matrixWorld);
+      
+      let faceLabel = "FACE";
+      let cqSelector = "'>Z'";
+      if (normal.z > 0.8) { faceLabel = "TOP FACE"; cqSelector = "'>Z'"; }
+      else if (normal.z < -0.8) { faceLabel = "BOTTOM FACE"; cqSelector = "'<Z'"; }
+      else if (normal.x > 0.8) { faceLabel = "SIDE FACE (+X)"; cqSelector = "'>X'"; }
+      else if (normal.x < -0.8) { faceLabel = "SIDE FACE (-X)"; cqSelector = "'<X'"; }
+      else if (normal.y > 0.8) { faceLabel = "SIDE FACE (+Y)"; cqSelector = "'>Y'"; }
+      else if (normal.y < -0.8) { faceLabel = "SIDE FACE (-Y)"; cqSelector = "'<Y'"; }
+      
+      window.clickedFaceNormal = { x: normal.x, y: normal.y, z: normal.z };
+      window.clickedFaceLabel = `${faceLabel} (recommended CadQuery selector: ${cqSelector})`;
+      
+      if (window.onGeometryClick) {
+          window.onGeometryClick(hit);
+      }
+      
+      const popup = document.getElementById('facePopup');
+      if (popup) {
+          document.getElementById('popupTitle').textContent = faceLabel;
+          popup.style.display = 'block';
+          popup.style.left = e.clientX + 'px';
+          popup.style.top = e.clientY + 'px';
+      }
+      
+      const originalEmissive = hit.object.material.emissive.clone();
+      hit.object.material.emissive = new THREE.Color(0x003344);
+      setTimeout(() => { if (hit.object) hit.object.material.emissive = originalEmissive; }, 1000);
   });
 });

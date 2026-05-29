@@ -599,6 +599,7 @@
           <input type="number" id="dim-h" value="20" min="1" step="1" />
         </div>
       </div>
+      <div id="warningPanel" class="warning-panel"></div>
     </div>
 
     <!-- Features -->
@@ -703,6 +704,7 @@ result = cq.Workplane('XY').box(50, 50, 50)"></textarea>
       <div id="log-entries">
         <div class="log-line" style="color:var(--text-muted);">Waiting for generation ΓÇª</div>
       </div>
+      <div id="generationLog" class="generation-log"></div>
     </div>
 
   </main>
@@ -715,8 +717,15 @@ result = cq.Workplane('XY').box(50, 50, 50)"></textarea>
       <div class="panel-title">PARAMETERS</div>
       <div id="slidersContainer"></div>
       <button class="btn-back" id="backBtn">← New Part</button>
+      <div class="history-panel">
+          <div class="panel-title">HISTORY</div>
+          <div id="historyList"></div>
+      </div>
     </div>
     <div class="viewer-panel" id="editViewerContainer">
+      <div class="viewer-toolbar-edit">
+          <button id="measureToggle" class="btn-viewer" title="Measure">📏</button>
+      </div>
       <div id="viewerCanvas" style="width:100%; height:100%;"></div>
       <div id="facePopup" class="face-popup" style="display:none">
         <div class="popup-title" id="popupTitle">TOP FACE</div>
@@ -725,6 +734,14 @@ result = cq.Workplane('XY').box(50, 50, 50)"></textarea>
         <button onclick="faceAction('Add fillet to all edges')">+ Fillet</button>
         <button onclick="faceAction('Add boss here')">+ Boss</button>
         <button class="btn-close" onclick="closePopup()">✕</button>
+      </div>
+      <div id="editPanel" class="edit-panel" style="display:none">
+          <div class="edit-panel-title" id="editPanelTitle">SELECTED FEATURE</div>
+          <div id="editFields"></div>
+          <div style="display:flex;gap:8px;margin-top:12px;">
+              <button class="btn-assist" onclick="applyGeometryEdit()" style="flex:1">Apply →</button>
+              <button class="btn-undo" onclick="closeEditPanel()">✕</button>
+          </div>
       </div>
     </div>
     <div class="script-panel" id="scriptPanel" style="display:none">
@@ -736,6 +753,7 @@ result = cq.Workplane('XY').box(50, 50, 50)"></textarea>
     <span class="ai-label">AI ›</span>
     <input type="text" id="aiInput" class="ai-input" placeholder='e.g. "add 4 M6 holes on top face"'/>
     <button id="aiBtn" class="btn-assist">MODIFY</button>
+    <button id="undoBtn" class="btn-undo" onclick="undoScript()" disabled>↩ Undo</button>
     <span id="aiStatus" class="ai-status"></span>
   </div>
 </div>
@@ -934,6 +952,16 @@ btnGenerate.addEventListener("click", async () => {
     const d = await r.json();
     if (d.error) { showError(d.error); return; }
     currentJobId = d.job_id;
+    const formData = { part_type: partType, length, width, height };
+    connectSSE(d.job_id, onSSELog, (sseData) => {
+      statusBar.classList.remove('visible');
+      btnGenerate.disabled = false;
+      if (sseData.script) {
+        if (typeof pushHistory === 'function') pushHistory(sseData.script);
+        saveToHistory(d.job_id, formData, sseData.script);
+      }
+      onGenerationComplete(d.job_id, sseData.script || '');
+    });
     startPolling();
   } catch (e) {
     showError("Failed to reach backend: " + e.message);
@@ -951,7 +979,7 @@ btnExecute.addEventListener("click", async () => {
   logEntries.innerHTML = "";
   emptyState.style.display = "none";
   statusBar.classList.add("visible");
-  statusText.textContent = "Executing script ΓÇª";
+  statusText.textContent = "Executing script ...";
   attemptBadge.textContent = "Manual";
 
   if (viewer) viewer.clear();
@@ -965,72 +993,17 @@ btnExecute.addEventListener("click", async () => {
     const d = await r.json();
     if (d.error) { showError(d.error); btnExecute.disabled = false; return; }
     currentJobId = d.job_id;
-    startPolling();
+    connectSSE(d.job_id, onSSELog, (sseData) => {
+      statusBar.classList.remove('visible');
+      btnExecute.disabled = false;
+      if (sseData.script && typeof pushHistory === 'function') pushHistory(sseData.script);
+      onGenerationComplete(d.job_id, sseData.script || '');
+    });
   } catch (e) {
     showError("Failed to reach backend: " + e.message);
     btnExecute.disabled = false;
   }
 });
-
-// ----- Refine -----
-function startPolling() {
-  if (pollTimer) clearInterval(pollTimer);
-  pollTimer = setInterval(() => pollStatus(), 800);
-}
-
-let lastLogLen = 0;
-
-async function pollStatus() {
-  if (!currentJobId) return;
-  try {
-    const r = await fetch(`/status/${currentJobId}`);
-    const d = await r.json();
-
-    if (d.error) {
-      showError(d.error);
-      clearInterval(pollTimer);
-      pollTimer = null;
-      return;
-    }
-
-    // Update status bar
-    const stepLabels = {
-      calculating_params: "Calculating parameters ΓÇª",
-      assembling_script:  "Assembling from templates ΓÇª",
-      executing:          "Executing CadQuery ΓÇª",
-      retrying:           "Retrying with safe defaults ΓÇª",
-      done:               "Complete",
-      failed:             "Generation failed",
-    };
-    statusText.textContent = stepLabels[d.step] || d.step;
-    attemptBadge.textContent = `${d.attempt} / ${d.max_attempts}`;
-
-    // Render new log entries
-    if (d.log.length > lastLogLen) {
-      for (let i = lastLogLen; i < d.log.length; i++) {
-        appendLog(d.log[i]);
-      }
-      lastLogLen = d.log.length;
-    }
-
-    // Terminal states
-    if (d.status === "completed") {
-      clearInterval(pollTimer);
-      pollTimer = null;
-      statusBar.classList.remove("visible");
-      
-      onGenerationComplete(currentJobId, d.script || "");
-      
-    } else if (d.status === "failed") {
-      clearInterval(pollTimer);
-      pollTimer = null;
-      statusBar.classList.remove("visible");
-      btnGenerate.disabled = false;
-      btnExecute.disabled = false;
-      showError(d.error || "Generation failed after all retries.");
-    }
-  } catch { /* keep polling */ }
-}
 
 function appendLog(entry) {
   const icons = { running: "Γùî", done: "Γ£ô", error: "Γ£ù" };
@@ -1112,8 +1085,12 @@ btnRefine.addEventListener("click", async () => {
     const d = await r.json();
     if (d.error) { showError(d.error); btnRefine.disabled = false; return; }
     currentJobId = d.job_id;
-    startPolling();
-    btnRefine.disabled = false;
+    connectSSE(d.job_id, onSSELog, (sseData) => {
+      statusBar.classList.remove('visible');
+      btnRefine.disabled = false;
+      if (sseData.script && typeof pushHistory === 'function') pushHistory(sseData.script);
+      onGenerationComplete(d.job_id, sseData.script || '');
+    });
     refineInput.value = "";
   } catch (e) {
     showError("Refine failed: " + e.message);
@@ -1172,25 +1149,22 @@ window.runCurrentScript = async function() {
     });
     const d = await res.json();
     
-    let execTimer = setInterval(async () => {
-        const sr = await fetch(`/status/${d.job_id}`);
-        const stat = await sr.json();
-        if (stat.status === 'completed') {
-            clearInterval(execTimer);
-            document.getElementById('runStatus').textContent = 'Updated';
-            document.getElementById('runStatus').className = 'run-status done';
-            window.currentJobId = d.job_id;
-            window.viewerInstance.loadSTL(`/model/${d.job_id}`);
-            if (typeof parseSliders === 'function') {
-                const params = parseSliders(stat.script || script);
-                buildSliders(params, onSliderChange);
-            }
-        } else if (stat.status === 'failed') {
-            clearInterval(execTimer);
+    connectSSE(d.job_id, onSSELog, (sseData) => {
+        if (sseData.status === 'failed' || sseData.error) {
             document.getElementById('runStatus').textContent = 'Error';
             document.getElementById('runStatus').className = 'run-status error';
+            return;
         }
-    }, 800);
+        document.getElementById('runStatus').textContent = 'Updated';
+        document.getElementById('runStatus').className = 'run-status done';
+        window.currentJobId = d.job_id;
+        window.viewerInstance.loadSTL(`/model/${d.job_id}`);
+        if (typeof pushHistory === 'function') pushHistory(sseData.script || script);
+        if (typeof parseSliders === 'function') {
+            const params = parseSliders(sseData.script || script);
+            buildSliders(params, onSliderChange);
+        }
+    });
 }
 
 // AI logic
@@ -1245,6 +1219,224 @@ window.faceAction = function(action) {
 window.closePopup = function() {
     const popup = document.getElementById('facePopup');
     if (popup) popup.style.display = 'none';
+}
+
+// ===================== SSE CONNECTION =====================
+function connectSSE(jobId, onLog, onComplete) {
+    const es = new EventSource(`/stream/${jobId}`);
+    es.onmessage = (e) => {
+        const data = JSON.parse(e.data);
+        if (data.complete) {
+            es.close();
+            onComplete(data);
+        } else {
+            onLog(data);
+        }
+    };
+    es.onerror = () => { es.close(); };
+    return es;
+}
+
+// ===================== GRANULAR LOADING =====================
+const STEP_MESSAGES = {
+    "params": "⏳ AI calculating parameters...",
+    "assemble": "⚙️ Assembling geometry from templates...",
+    "execute": "🔧 Executing CadQuery script...",
+    "validate": "✓ Validating geometry...",
+    "complete": "📦 Exporting STEP + STL...",
+    "error": "✗ Generation failed"
+};
+
+function onSSELog(entry) {
+    const msg = STEP_MESSAGES[entry.stage] || entry.message || '';
+    const statusEl = document.getElementById('status-text');
+    if (statusEl) statusEl.textContent = msg;
+    const runStatus = document.getElementById('runStatus');
+    if (runStatus) {
+        runStatus.textContent = msg;
+        runStatus.className = 'run-status ' + (entry.status || '');
+    }
+    const log = document.getElementById('generationLog');
+    if (log) {
+        const line = document.createElement('div');
+        line.className = 'log-line ' + (entry.status || '');
+        line.textContent = msg;
+        log.appendChild(line);
+        log.scrollTop = log.scrollHeight;
+    }
+}
+
+// ===================== CONSTRAINT VALIDATION =====================
+const CONSTRAINTS = {
+    bracket: [
+        { check: (l,w,h) => h < 10, msg: "Height too thin — minimum 10mm for structural integrity" },
+        { check: (l,w,h) => w > l*2, msg: "Width exceeds 2× length — unusual bracket proportion" },
+        { check: (l,w,h) => h > l, msg: "Height exceeds length — consider rotating orientation" }
+    ],
+    plate: [
+        { check: (l,w,h) => h < 3, msg: "Thickness under 3mm — risk of warping during machining" },
+        { check: (l,w,h) => l/h > 50, msg: "Very high aspect ratio — consider ribbing for stiffness" }
+    ],
+    shaft: [
+        { check: (l,w,h) => l/w > 20, msg: "L/D ratio >20 — shaft may deflect under load" },
+        { check: (l,w,h) => w < 5, msg: "Diameter under 5mm — fragile, verify torque requirements" }
+    ],
+    beam: [
+        { check: (l,w,h) => h < w*0.5, msg: "Beam height too low relative to width" }
+    ],
+    housing: [
+        { check: (l,w,h) => Math.min(l,w,h) < 15, msg: "Minimum dimension under 15mm — shell may fail" }
+    ]
+};
+
+function validateInputs() {
+    const typeEl = document.getElementById('part-type');
+    const type = typeEl ? typeEl.value.toLowerCase() : '';
+    const l = parseFloat(document.getElementById('dim-l')?.value) || 0;
+    const w = parseFloat(document.getElementById('dim-w')?.value) || 0;
+    const h = parseFloat(document.getElementById('dim-h')?.value) || 0;
+    const panel = document.getElementById('warningPanel');
+    if (!panel) return;
+    panel.innerHTML = '';
+    const checks = CONSTRAINTS[type] || [];
+    checks.forEach(c => {
+        if (c.check(l, w, h)) {
+            panel.innerHTML += '<div class="warning">⚠ ' + c.msg + '</div>';
+        }
+    });
+}
+
+// Wire constraint validation
+['dim-l','dim-w','dim-h'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener('input', validateInputs);
+});
+const ptSelect = document.getElementById('part-type');
+if (ptSelect) ptSelect.addEventListener('change', validateInputs);
+
+// ===================== UNDO STACK =====================
+const scriptHistory = [];
+let historyIndex = -1;
+
+window.pushHistory = function(script) {
+    scriptHistory.splice(historyIndex + 1);
+    scriptHistory.push(script);
+    if (scriptHistory.length > 10) scriptHistory.shift();
+    historyIndex = scriptHistory.length - 1;
+    updateUndoBtn();
+}
+
+window.undoScript = function() {
+    if (historyIndex <= 0) return;
+    historyIndex--;
+    const script = scriptHistory[historyIndex];
+    window.currentScript = script;
+    if (window.monacoInstance) window.monacoInstance.setValue(script);
+    if (typeof parseSliders === 'function') buildSliders(parseSliders(script));
+    runCurrentScript();
+    updateUndoBtn();
+}
+
+function updateUndoBtn() {
+    const btn = document.getElementById('undoBtn');
+    if (!btn) return;
+    btn.disabled = historyIndex <= 0;
+    btn.textContent = '↩ Undo (' + historyIndex + ')';
+}
+
+// ===================== PART HISTORY =====================
+const HISTORY_KEY = 'designos_history';
+
+window.saveToHistory = function(jobId, formData, scriptContent) {
+    const history = JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]');
+    history.unshift({
+        id: jobId,
+        timestamp: Date.now(),
+        label: (formData.part_type||'Part') + ' ' + (formData.length||0) + '×' + (formData.width||0) + '×' + (formData.height||0),
+        script: scriptContent,
+        stlUrl: '/model/' + jobId
+    });
+    if (history.length > 8) history.pop();
+    localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
+    renderHistory();
+}
+
+function renderHistory() {
+    const history = JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]');
+    const container = document.getElementById('historyList');
+    if (!container) return;
+    container.innerHTML = history.map((item, i) =>
+        '<div class="history-item" onclick="restoreFromHistory(' + i + ')">' +
+        '<div class="history-label">' + item.label + '</div>' +
+        '<div class="history-time">' + timeAgo(item.timestamp) + '</div>' +
+        '</div>'
+    ).join('');
+}
+
+window.restoreFromHistory = function(index) {
+    const history = JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]');
+    const item = history[index];
+    if (!item) return;
+    window.currentScript = item.script;
+    if (window.monacoInstance) window.monacoInstance.setValue(item.script);
+    if (window.viewerInstance) window.viewerInstance.loadSTL(item.stlUrl);
+    if (typeof parseSliders === 'function') buildSliders(parseSliders(item.script));
+}
+
+function timeAgo(ts) {
+    const mins = Math.floor((Date.now() - ts) / 60000);
+    if (mins < 1) return 'just now';
+    if (mins < 60) return mins + 'm ago';
+    return Math.floor(mins/60) + 'h ago';
+}
+
+// Render history on load
+renderHistory();
+
+// ===================== GEOMETRY CLICK-EDIT =====================
+window.onGeometryClick = function(hit) {
+    const normal = hit.face.normal.clone().transformDirection(hit.object.matrixWorld);
+    const bbox = new THREE.Box3().setFromObject(hit.object);
+    const size = new THREE.Vector3();
+    bbox.getSize(size);
+    let fields = {};
+    let title = "";
+    if (size.x < 20 && size.y < 20) {
+        title = "HOLE";
+        fields = { "diameter_mm": Math.min(size.x, size.y).toFixed(1), "x_position_mm": hit.point.x.toFixed(1), "y_position_mm": hit.point.y.toFixed(1) };
+    } else if (normal.z > 0.8) {
+        title = "TOP FACE";
+        fields = { "length_mm": size.x.toFixed(1), "width_mm": size.y.toFixed(1) };
+    } else {
+        title = "WALL";
+        fields = { "thickness_mm": Math.min(size.x, size.y).toFixed(1), "height_mm": size.z.toFixed(1) };
+    }
+    document.getElementById('editPanelTitle').textContent = title;
+    const fieldsDiv = document.getElementById('editFields');
+    fieldsDiv.innerHTML = Object.entries(fields).map(([k,v]) =>
+        '<div class="edit-field"><label>' + k.replace(/_/g,' ') + '</label>' +
+        '<input type="text" id="ef_' + k + '" value="' + v + '" class="edit-input"/></div>'
+    ).join('');
+    window.editContext = { title, fields, hitPoint: hit.point, normal };
+    document.getElementById('editPanel').style.display = 'block';
+}
+
+window.applyGeometryEdit = async function() {
+    const fields = window.editContext.fields;
+    const updated = {};
+    Object.keys(fields).forEach(k => {
+        const el = document.getElementById('ef_' + k);
+        updated[k] = el ? el.value : fields[k];
+    });
+    const changes = Object.entries(updated).map(([k,v]) => k.replace(/_/g,' ') + ' = ' + v).join(', ');
+    const instruction = 'Modify the ' + window.editContext.title.toLowerCase() + ': set ' + changes;
+    document.getElementById('aiInput').value = instruction;
+    closeEditPanel();
+    await triggerAI();
+}
+
+window.closeEditPanel = function() {
+    document.getElementById('editPanel').style.display = 'none';
 }
 
 </script>

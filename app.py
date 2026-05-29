@@ -4,6 +4,7 @@ Flask server that orchestrates a local Ollama Qwen model and CadQuery
 to generate parametric CAD models from natural-language descriptions.
 """
 
+import ast
 import os
 import re
 import uuid
@@ -11,7 +12,7 @@ import json
 import time
 import threading
 import subprocess
-from flask import Flask, request, jsonify, send_file, render_template
+from flask import Flask, request, jsonify, send_file, render_template, Response
 from flask_cors import CORS
 import requests as http_requests
 
@@ -20,7 +21,7 @@ import requests as http_requests
 # ---------------------------------------------------------------------------
 
 app = Flask(__name__)
-CORS(app)
+CORS(app, origins=["http://localhost:5000", "http://127.0.0.1:5000"])
 
 TEMP_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "temp")
 CADQUERY_PYTHON = r"H:\Miniconda3\python.exe"
@@ -122,6 +123,28 @@ def sanitise_script(script: str) -> str:
             continue
         cleaned.append(line)
     return "\n".join(cleaned)
+
+
+BLACKLISTED_MODULES = {'os', 'subprocess', 'sys', 'shutil', 'socket', 'requests', 'urllib', 'http'}
+
+def validate_script_safety(script: str) -> tuple:
+    """Returns (is_safe, reason)"""
+    try:
+        tree = ast.parse(script)
+    except SyntaxError as e:
+        return False, f"Syntax error: {e}"
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name.split('.')[0] in BLACKLISTED_MODULES:
+                    return False, f"Blocked import: {alias.name}"
+        if isinstance(node, ast.ImportFrom):
+            if node.module and node.module.split('.')[0] in BLACKLISTED_MODULES:
+                return False, f"Blocked import: {node.module}"
+        if isinstance(node, ast.Call):
+            if isinstance(node.func, ast.Name) and node.func.id in {'eval', 'exec', 'compile', '__import__'}:
+                return False, f"Blocked call: {node.func.id}"
+    return True, "OK"
 
 
 # ---------------------------------------------------------------------------
@@ -387,7 +410,7 @@ if _designos_export_target is not None:
 # ---------------------------------------------------------------------------
 
 def _log(job_id: str, step: str, status: str, message: str, detail: str = ""):
-    entry = {"step": step, "status": status, "message": message, "ts": time.time()}
+    entry = {"step": step, "stage": step, "status": status, "message": message, "ts": time.time()}
     if detail:
         entry["detail"] = detail
     jobs[job_id]["log"].append(entry)
@@ -628,6 +651,34 @@ def status(job_id):
     })
 
 
+@app.route("/stream/<job_id>")
+def stream_job(job_id):
+    def generate():
+        last_count = 0
+        timeout = 0
+        while timeout < 180:
+            job = jobs.get(job_id)
+            if not job:
+                yield f"data: {json.dumps({'error': 'Job not found'})}\n\n"
+                break
+            logs = job.get("log", [])
+            for entry in logs[last_count:]:
+                yield f"data: {json.dumps(entry)}\n\n"
+            last_count = len(logs)
+            if job.get("status") in ["completed", "failed"]:
+                final = {"status": job["status"], "complete": True,
+                         "has_stl_file": job.get("stl_file") is not None,
+                         "has_step_file": job.get("step_file") is not None,
+                         "script": job.get("script", ""),
+                         "error": job.get("error")}
+                yield f"data: {json.dumps(final)}\n\n"
+                break
+            time.sleep(0.5)
+            timeout += 0.5
+    return Response(generate(), mimetype='text/event-stream',
+                   headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'})
+
+
 @app.route("/download/<job_id>")
 def download(job_id):
     if job_id not in jobs or not jobs[job_id].get("step_file"):
@@ -739,6 +790,9 @@ def run_script():
     raw_script = data.get("script", "").strip()
     if not raw_script:
         return jsonify({"error": "No script"}), 400
+    safe, reason = validate_script_safety(raw_script)
+    if not safe:
+        return jsonify({"error": f"Script rejected: {reason}"}), 400
     job_id = _new_job("ide_script")
     jobs[job_id]["script"] = raw_script
     def execute():
@@ -780,9 +834,12 @@ Rules:
 
     raw = call_ollama(QWEN_MODEL, ASSIST_PROMPT, "")
     script = extract_python_code(raw)
+    safe, reason = validate_script_safety(script)
+    if not safe:
+        return jsonify({"error": f"AI generated unsafe script: {reason}"}), 400
     return jsonify({"script": script})
 
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    app.run(debug=True, use_reloader=False, port=5000)
+    app.run(debug=False, use_reloader=False, port=5000)
