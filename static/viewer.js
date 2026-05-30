@@ -40,6 +40,34 @@ export class CADViewer {
     this.camera = new THREE.PerspectiveCamera(45, aspect, 0.1, 50000);
     this.camera.position.set(150, 120, 150);
 
+    // HUD (Corner Axes)
+    this.hudScene = new THREE.Scene();
+    this.hudCamera = new THREE.PerspectiveCamera(50, 1, 0.1, 10);
+    this.hudCamera.position.set(0, 0, 3);
+    this.hudAxes = new THREE.AxesHelper(1);
+    this.hudScene.add(this.hudAxes);
+
+    // Add X, Y, Z text sprites to HUD
+    const createTextSprite = (text, color) => {
+      const canvas = document.createElement('canvas');
+      canvas.width = 64; canvas.height = 64;
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = color;
+      ctx.font = 'bold 48px monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(text, 32, 32);
+      const texture = new THREE.CanvasTexture(canvas);
+      const spriteMaterial = new THREE.SpriteMaterial({ map: texture, depthTest: false });
+      const sprite = new THREE.Sprite(spriteMaterial);
+      sprite.scale.set(0.4, 0.4, 0.4);
+      return sprite;
+    };
+    
+    const spriteX = createTextSprite('X', '#ff4444'); spriteX.position.set(1.2, 0, 0); this.hudScene.add(spriteX);
+    const spriteY = createTextSprite('Y', '#44ff44'); spriteY.position.set(0, 1.2, 0); this.hudScene.add(spriteY);
+    const spriteZ = createTextSprite('Z', '#4444ff'); spriteZ.position.set(0, 0, 1.2); this.hudScene.add(spriteZ);
+
     // Renderer
     this.renderer = new THREE.WebGLRenderer({ antialias: true });
     this.renderer.setSize(this.container.clientWidth, this.container.clientHeight);
@@ -48,13 +76,14 @@ export class CADViewer {
     this.renderer.toneMappingExposure = 1.2;
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.autoClear = false; // required for HUD
     this.container.appendChild(this.renderer.domElement);
 
     // Controls
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
     this.controls.enableDamping = true;
     this.controls.dampingFactor = 0.08;
-    this.controls.autoRotate = true;
+    this.controls.autoRotate = false;
     this.controls.autoRotateSpeed = 2.0;
     this.controls.minDistance = 5;
     this.controls.maxDistance = 10000;
@@ -96,6 +125,9 @@ export class CADViewer {
     // Handle resize
     this._resizeObserver = new ResizeObserver(() => this._onResize());
     this._resizeObserver.observe(this.container);
+
+    // Interaction
+    this.renderer.domElement.addEventListener('click', (e) => this._onClick(e));
 
     // Render loop
     this._animate();
@@ -177,7 +209,22 @@ export class CADViewer {
   _animate() {
     requestAnimationFrame(() => this._animate());
     this.controls.update();
+
+    const w = this.container.clientWidth;
+    const h = this.container.clientHeight;
+
+    // Render main scene
+    this.renderer.setViewport(0, 0, w, h);
+    this.renderer.clear();
     this.renderer.render(this.scene, this.camera);
+
+    // Render HUD (corner axes)
+    const hudSize = 100;
+    this.renderer.setViewport(w - hudSize - 20, 20, hudSize, hudSize);
+    this.hudCamera.position.copy(this.camera.position).normalize().multiplyScalar(3);
+    this.hudCamera.lookAt(0, 0, 0);
+    this.renderer.clearDepth();
+    this.renderer.render(this.hudScene, this.hudCamera);
   }
 
   _onResize() {
@@ -188,65 +235,23 @@ export class CADViewer {
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(w, h);
   }
-}
 
-// Face click detection
-const raycaster = new THREE.Raycaster();
-const mouse = new THREE.Vector2();
+  _onClick(e) {
+    if (!this.currentModel) return;
 
-function getRaycastHit(e, viewerCanvas) {
-    const model = window.viewerInstance ? window.viewerInstance.currentModel : window.currentModel;
-    if (!model) return null;
-    
-    const rect = viewerCanvas.getBoundingClientRect();
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    const mouse = new THREE.Vector2();
     mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
     mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
-    
-    const camera = window.viewerInstance ? window.viewerInstance.camera : null;
-    if (!camera) return null;
-    
-    raycaster.setFromCamera(mouse, camera);
-    const intersects = raycaster.intersectObject(model, true);
-    return intersects.length > 0 ? intersects[0] : null;
-}
 
-function showMeasurementLabel(x, y, text) {
-    document.querySelectorAll('.measure-label').forEach(el => el.remove());
-    const label = document.createElement('div');
-    label.className = 'measure-label';
-    label.textContent = text;
-    label.style.cssText = `position:fixed;left:${x}px;top:${y-30}px;background:#000;border:1px solid #00d4ff;color:#00d4ff;padding:4px 8px;font-size:11px;font-family:monospace;pointer-events:none;z-index:999;`;
-    document.body.appendChild(label);
-    setTimeout(() => label.remove(), 3000);
-}
+    const raycaster = new THREE.Raycaster();
+    raycaster.setFromCamera(mouse, this.camera);
+    const intersects = raycaster.intersectObject(this.currentModel, true);
 
-document.addEventListener('DOMContentLoaded', () => {
-  const viewerCanvas = document.getElementById('viewerCanvas');
-  if (!viewerCanvas) return;
-  
-  const measureToggle = document.getElementById('measureToggle');
-  if (measureToggle) {
-      measureToggle.addEventListener('click', () => {
-          measureMode = !measureMode;
-          measureToggle.classList.toggle('active', measureMode);
-          viewerCanvas.style.cursor = measureMode ? 'crosshair' : 'default';
-      });
-  }
-
-  viewerCanvas.addEventListener('click', (e) => {
-      const hit = getRaycastHit(e, viewerCanvas);
-      if (!hit) return;
-
-      if (measureMode) {
-          const bbox = new THREE.Box3().setFromObject(hit.object);
-          const size = new THREE.Vector3();
-          bbox.getSize(size);
-          showMeasurementLabel(e.clientX, e.clientY, `${size.x.toFixed(1)} × ${size.y.toFixed(1)} × ${size.z.toFixed(1)} mm`);
-          return;
-      }
-      
+    if (intersects.length > 0) {
+      const hit = intersects[0];
       const normal = hit.face.normal.clone().transformDirection(hit.object.matrixWorld);
-      
+
       let faceLabel = "FACE";
       let cqSelector = "'>Z'";
       if (normal.z > 0.8) { faceLabel = "TOP FACE"; cqSelector = "'>Z'"; }
@@ -255,24 +260,17 @@ document.addEventListener('DOMContentLoaded', () => {
       else if (normal.x < -0.8) { faceLabel = "SIDE FACE (-X)"; cqSelector = "'<X'"; }
       else if (normal.y > 0.8) { faceLabel = "SIDE FACE (+Y)"; cqSelector = "'>Y'"; }
       else if (normal.y < -0.8) { faceLabel = "SIDE FACE (-Y)"; cqSelector = "'<Y'"; }
-      
+
       window.clickedFaceNormal = { x: normal.x, y: normal.y, z: normal.z };
       window.clickedFaceLabel = `${faceLabel} (recommended CadQuery selector: ${cqSelector})`;
-      
+
       if (window.onGeometryClick) {
-          window.onGeometryClick(hit);
+        window.onGeometryClick(hit);
       }
-      
-      const popup = document.getElementById('facePopup');
-      if (popup) {
-          document.getElementById('popupTitle').textContent = faceLabel;
-          popup.style.display = 'block';
-          popup.style.left = e.clientX + 'px';
-          popup.style.top = e.clientY + 'px';
-      }
-      
+
       const originalEmissive = hit.object.material.emissive.clone();
-      hit.object.material.emissive = new THREE.Color(0x003344);
-      setTimeout(() => { if (hit.object) hit.object.material.emissive = originalEmissive; }, 1000);
-  });
-});
+      hit.object.material.emissive = new THREE.Color(0x00d4ff); // bright blue highlight
+      setTimeout(() => { if (hit.object) hit.object.material.emissive = originalEmissive; }, 800);
+    }
+  }
+}

@@ -123,15 +123,24 @@ input[type=range] { width: 100%; accent-color: var(--accent); }
 .canvas-header-right { margin-left: auto; display: flex; gap: 8px; align-items: center; }
 
 /* Canvas 3-column layout */
-.canvas-layout { flex: 1; display: grid; grid-template-columns: 160px 1fr 220px; overflow: hidden; }
+.canvas-layout { flex: 1; display: grid; grid-template-columns: 200px 1fr 240px; overflow: hidden; }
 
-/* Left sidebar: add geometry */
-.add-geometry-sidebar { background: var(--panel); border-right: 1px solid var(--border); padding: 12px; overflow-y: auto; }
-.block-group-title { font-size: 9px; color: var(--text-dim); letter-spacing: 2px; margin: 12px 0 6px; }
-.block-btn { padding: 8px 10px; border: 1px solid var(--border); margin-bottom: 4px; cursor: pointer; font-size: 11px; color: var(--text); font-family: var(--mono); transition: all 0.15s; }
-.block-btn:hover { border-color: var(--accent); color: var(--accent); background: rgba(0,212,255,0.05); }
-.face-select-row { margin-top: 16px; border-top: 1px solid var(--border); padding-top: 12px; }
-.face-select { width: 100%; background: var(--bg); border: 1px solid var(--border); color: var(--text); padding: 6px; font-family: var(--mono); font-size: 11px; }
+/* Top Toolbar */
+.canvas-toolbar { background: var(--panel); border-bottom: 1px solid var(--border); display: flex; align-items: center; padding: 6px 16px; gap: 24px; flex-shrink: 0; overflow-x: auto; }
+.toolbar-group { display: flex; align-items: center; gap: 4px; }
+.toolbar-label { font-size: 9px; color: var(--text-dim); letter-spacing: 1px; margin-right: 8px; font-weight: 600; }
+.tool-btn { background: transparent; border: 1px solid transparent; color: var(--text); padding: 6px 10px; font-size: 11px; cursor: pointer; transition: all 0.2s; border-radius: 4px; display: flex; align-items: center; gap: 6px; font-family: var(--mono); }
+.tool-btn:hover { background: rgba(255,255,255,0.05); border-color: var(--border); }
+.tool-icon { color: var(--accent); font-size: 14px; font-weight: bold; }
+.toolbar-divider { width: 1px; height: 24px; background: var(--border); }
+
+/* Target Face Selector in Toolbar */
+.face-selector-label { background: rgba(0,212,255,0.05); border: 1px dashed var(--accent); color: var(--text); padding: 6px 12px; font-size: 11px; cursor: pointer; border-radius: 4px; font-family: var(--mono); transition: all 0.2s; }
+.face-selector-label.active { background: rgba(0,212,255,0.15); border: 1px solid var(--accent); color: var(--accent); font-weight: bold; }
+.face-selector-label:hover { background: rgba(0,212,255,0.2); }
+
+/* Left sidebar: Browser */
+.left-sidebar { background: var(--panel); border-right: 1px solid var(--border); padding: 12px; overflow-y: auto; display: flex; flex-direction: column; gap: 16px; }
 
 /* Center: viewer */
 .canvas-viewer-panel { position: relative; background: var(--bg); overflow: hidden; }

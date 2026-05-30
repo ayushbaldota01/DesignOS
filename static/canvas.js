@@ -7,6 +7,7 @@
 const canvas = {
     sessionId: null,
     selectedBlockId: null,
+    selectedFace: null,
     blocks: [],
     updateTimer: null,
     currentJobId: null
@@ -14,21 +15,21 @@ const canvas = {
 
 // ─── Default params for each block type ───
 const DEFAULT_PARAMS = {
-    bracket: { length: 80.0, width: 50.0, height: 40.0, wall_t: 5.0 },
-    plate:   { length: 50.0, width: 50.0, height: 5.0 },
-    shaft:   { diameter: 20.0, length: 60.0 },
-    housing: { length: 60.0, width: 40.0, height: 30.0, wall_t: 3.0 },
-    channel: { length: 80.0, width: 40.0, height: 30.0, wall_t: 3.0 },
-    gear:    { diameter: 40.0, height: 10.0 },
-    i_beam:  { height: 60.0, width: 30.0, length: 100.0, web_thickness: 4.0, flange_thickness: 6.0 },
+    bracket: { length: 80.0, width: 50.0, height: 40.0, wall_t: 5.0, x: 0, y: 0, z: 0 },
+    plate:   { length: 50.0, width: 50.0, height: 5.0, x: 0, y: 0, z: 0 },
+    shaft:   { diameter: 20.0, length: 60.0, x: 0, y: 0, z: 0 },
+    housing: { length: 60.0, width: 40.0, height: 30.0, wall_t: 3.0, x: 0, y: 0, z: 0 },
+    channel: { length: 80.0, width: 40.0, height: 30.0, wall_t: 3.0, x: 0, y: 0, z: 0 },
+    gear:    { diameter: 40.0, height: 10.0, x: 0, y: 0, z: 0 },
+    i_beam:  { height: 60.0, width: 30.0, length: 100.0, web_thickness: 4.0, flange_thickness: 6.0, x: 0, y: 0, z: 0 },
     holes:   { hole_points: "[[20,0],[-20,0]]", hole_dia: 6.6 },
     fillets: { radius: 2.0 },
     chamfers:{ size: 1.0 },
     pockets: { width: 30.0, length: 20.0, depth: 5.0 },
-    boss:    { diameter: 15.0, height: 10.0 },
+    boss:    { diameter: 15.0, height: 10.0, x: 0, y: 0 },
     shell:   { wall_t: 2.0 },
     smart_fillet: { radius: 2.0 },
-    flange:  { length: 60.0, width: 60.0, height: 8.0, wall_t: 3.0 }
+    flange:  { length: 60.0, width: 60.0, height: 8.0, wall_t: 3.0, x: 0, y: 0, z: 0 }
 };
 
 const BLOCK_ICONS = {
@@ -202,9 +203,28 @@ window.updateCanvasParam = function(inputEl) {
 
 // ─── Add geometry block ───
 window.addGeometry = function(blockType) {
-    const face = document.getElementById('canvasFaceSelector')?.value || '>Z';
+    const face = canvas.selectedFace || '>Z';
     const params = { ...(DEFAULT_PARAMS[blockType] || {}) };
     _addBlock(blockType, params, face);
+};
+
+// ─── Geometry click handler (from viewer.js) ───
+window.onGeometryClick = function(hit) {
+    if (hit) {
+        // Extract CadQuery selector from window.clickedFaceLabel
+        const match = window.clickedFaceLabel.match(/'([^']+)'/);
+        if (match) {
+            canvas.selectedFace = match[1];
+            document.getElementById('canvasFaceSelectorLabel').textContent = canvas.selectedFace;
+            document.getElementById('canvasFaceSelectorLabel').classList.add('active');
+        }
+    }
+};
+
+window.clearFaceSelection = function() {
+    canvas.selectedFace = null;
+    document.getElementById('canvasFaceSelectorLabel').textContent = "None (Free Space)";
+    document.getElementById('canvasFaceSelectorLabel').classList.remove('active');
 };
 
 async function _addBlock(blockType, params, face) {

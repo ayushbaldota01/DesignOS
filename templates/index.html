@@ -782,39 +782,45 @@ result = cq.Workplane('XY').box(50, 50, 50)"></textarea>
       <button class="btn-back" onclick="canvasBackToForm()" style="width:auto;margin:0">← New Part</button>
     </div>
   </div>
+  <!-- New Top Toolbar -->
+  <div class="canvas-toolbar">
+    <div class="toolbar-group">
+      <span class="toolbar-label">STRUCTURAL</span>
+      <button class="tool-btn" onclick="addGeometry('bracket')"><span class="tool-icon">L</span> Bracket</button>
+      <button class="tool-btn" onclick="addGeometry('plate')"><span class="tool-icon">□</span> Plate</button>
+      <button class="tool-btn" onclick="addGeometry('channel')"><span class="tool-icon">U</span> Channel</button>
+      <button class="tool-btn" onclick="addGeometry('i_beam')"><span class="tool-icon">I</span> Beam</button>
+      <button class="tool-btn" onclick="addGeometry('flange')"><span class="tool-icon">◎</span> Flange</button>
+    </div>
+    
+    <div class="toolbar-group">
+      <span class="toolbar-label">FEATURES</span>
+      <button class="tool-btn" onclick="addGeometry('holes')"><span class="tool-icon">○</span> Holes</button>
+      <button class="tool-btn" onclick="addGeometry('fillets')"><span class="tool-icon">⌒</span> Fillet</button>
+      <button class="tool-btn" onclick="addGeometry('chamfers')"><span class="tool-icon">/</span> Chamfer</button>
+      <button class="tool-btn" onclick="addGeometry('pockets')"><span class="tool-icon">▽</span> Pocket</button>
+      <button class="tool-btn" onclick="addGeometry('boss')"><span class="tool-icon">⬆</span> Boss</button>
+    </div>
+    
+    <div class="toolbar-group">
+      <span class="toolbar-label">ROTATIONAL</span>
+      <button class="tool-btn" onclick="addGeometry('shaft')"><span class="tool-icon">|</span> Shaft</button>
+      <button class="tool-btn" onclick="addGeometry('gear')"><span class="tool-icon">⚙</span> Gear</button>
+    </div>
+    
+    <div class="toolbar-divider"></div>
+    <div class="toolbar-group face-group">
+      <span class="toolbar-label">TARGET FACE</span>
+      <div id="canvasFaceSelectorLabel" class="face-selector-label" onclick="clearFaceSelection()" title="Click to clear selection">None (Free Space)</div>
+    </div>
+  </div>
+
   <div class="canvas-layout">
-    <!-- Left: Add Geometry Sidebar -->
-    <div class="add-geometry-sidebar">
-      <div class="panel-title">ADD GEOMETRY</div>
-
-      <div class="block-group-title">STRUCTURAL</div>
-      <div class="block-btn" onclick="addGeometry('bracket')">L Bracket</div>
-      <div class="block-btn" onclick="addGeometry('plate')">□ Plate</div>
-      <div class="block-btn" onclick="addGeometry('channel')">U Channel</div>
-      <div class="block-btn" onclick="addGeometry('i_beam')">I Beam</div>
-      <div class="block-btn" onclick="addGeometry('flange')">◎ Flange</div>
-
-      <div class="block-group-title">FEATURES</div>
-      <div class="block-btn" onclick="addGeometry('holes')">○ Holes</div>
-      <div class="block-btn" onclick="addGeometry('fillets')">⌒ Fillet</div>
-      <div class="block-btn" onclick="addGeometry('chamfers')">/ Chamfer</div>
-      <div class="block-btn" onclick="addGeometry('pockets')">▽ Pocket</div>
-      <div class="block-btn" onclick="addGeometry('boss')">⬆ Boss</div>
-
-      <div class="block-group-title">ROTATIONAL</div>
-      <div class="block-btn" onclick="addGeometry('shaft')">| Shaft</div>
-      <div class="block-btn" onclick="addGeometry('gear')">⚙ Gear</div>
-
-      <div class="face-select-row">
-        <div class="panel-title">MOUNT ON</div>
-        <select id="canvasFaceSelector" class="face-select">
-          <option value=">Z">Top face (>Z)</option>
-          <option value="<Z">Bottom face (<Z)</option>
-          <option value=">Y">Front face (>Y)</option>
-          <option value="<Y">Back face (<Y)</option>
-          <option value=">X">Right face (>X)</option>
-          <option value="<X">Left face (<X)</option>
-        </select>
+    <!-- Left: Assembly Tree -->
+    <div class="left-sidebar">
+      <div class="assembly-tree">
+        <div class="panel-title">BROWSER (ASSEMBLY)</div>
+        <div id="assemblyTree"></div>
       </div>
     </div>
 
@@ -823,15 +829,10 @@ result = cq.Workplane('XY').box(50, 50, 50)"></textarea>
       <div id="canvasViewerContainer" style="width:100%;height:100%;"></div>
     </div>
 
-    <!-- Right: Params + Assembly Tree -->
+    <!-- Right: Params -->
     <div class="right-sidebar">
       <div id="paramPanel" class="param-panel">
-        <div class="param-panel-empty">Click a block in the assembly tree to edit its parameters</div>
-      </div>
-
-      <div class="assembly-tree">
-        <div class="panel-title">ASSEMBLY</div>
-        <div id="assemblyTree"></div>
+        <div class="param-panel-empty">Click a block in the browser to edit its properties</div>
       </div>
     </div>
   </div>

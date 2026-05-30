@@ -40,16 +40,16 @@ def parse_blocks(script: str) -> list:
 def _parse_params(block_type, params_raw):
     """Convert params_raw string into a named dict based on block type."""
     PARAM_SCHEMAS = {
-        "bracket":  ["length", "width", "height", "wall_t"],
-        "l_bracket":["height", "base_length", "width", "thickness", "root_fillet"],
-        "plate":    ["length", "width", "height"],
-        "shaft":    ["diameter", "length"],
-        "housing":  ["length", "width", "height", "wall_t"],
-        "channel":  ["length", "width", "height", "wall_t"],
-        "flange":   ["length", "width", "height", "wall_t"],
-        "gear":     ["diameter", "height"],
-        "i_beam":   ["height", "width", "length", "web_thickness", "flange_thickness"],
-        "two_stage_parallel_shaft": ["d1", "l1", "d2", "l2"],
+        "bracket":  ["length", "width", "height", "wall_t", "x", "y", "z"],
+        "l_bracket":["height", "base_length", "width", "thickness", "root_fillet", "x", "y", "z"],
+        "plate":    ["length", "width", "height", "x", "y", "z"],
+        "shaft":    ["diameter", "length", "x", "y", "z"],
+        "housing":  ["length", "width", "height", "wall_t", "x", "y", "z"],
+        "channel":  ["length", "width", "height", "wall_t", "x", "y", "z"],
+        "flange":   ["length", "width", "height", "wall_t", "x", "y", "z"],
+        "gear":     ["diameter", "height", "x", "y", "z"],
+        "i_beam":   ["height", "width", "length", "web_thickness", "flange_thickness", "x", "y", "z"],
+        "two_stage_parallel_shaft": ["d1", "l1", "d2", "l2", "x", "y", "z"],
         "holes":    ["hole_points", "hole_dia"],
         "fillets":  ["radius"],
         "chamfers": ["size"],
@@ -106,8 +106,22 @@ def _split_params(raw):
 # Block parameter update (NO AI)
 # ---------------------------------------------------------------------------
 
-def update_block_param(script: str, block_id: str, param_key: str, new_value) -> str:
-    """Update a single named parameter in a block. Pure regex — zero AI."""
+def _resolve_parent_var(blocks, target_id):
+    """Trace up the feature chain to find the actual base variable name."""
+    FEATURE_TYPES = {'holes', 'fillets', 'chamfers', 'pockets', 'boss', 'shell', 'smart_fillet', 'flange_holes'}
+    current_id = target_id
+    while current_id:
+        b = next((b for b in blocks if b["id"] == current_id), None)
+        if not b:
+            return f"b{current_id}"
+        if b["type"] in FEATURE_TYPES and b["parent"]:
+            current_id = b["parent"]
+        else:
+            return f"b{current_id}"
+    return "b001"
+
+def update_block_param(script: str, block_id: str, param_key: str, new_value: any) -> str:
+    """Updates a single parameter inside a tagged block script."""
     blocks = parse_blocks(script)
     target = next((b for b in blocks if b["id"] == block_id), None)
     if not target:
@@ -121,7 +135,8 @@ def update_block_param(script: str, block_id: str, param_key: str, new_value) ->
     old_params[param_key] = str(new_value)
     
     # Rebuild the code line
-    new_code = _rebuild_code_line(target["type"], old_params, target["parent"])
+    parent_var = _resolve_parent_var(blocks, target["parent"])
+    new_code = _rebuild_code_line(target["type"], old_params, target["parent"], target["id"], parent_var)
     new_params_raw = _rebuild_params_raw(old_params)
     
     # Rebuild the tag line
@@ -141,9 +156,8 @@ def _rebuild_params_raw(params):
     return ",".join(str(v) for v in params.values())
 
 
-def _rebuild_code_line(block_type, params, parent_id):
+def _rebuild_code_line(block_type, params, parent_id, block_id, parent_var="b001"):
     """Rebuild the Python code line from block type and params."""
-    parent_var = f"b{parent_id}" if parent_id else "b001"
     
     FEATURE_TYPES = {'holes', 'fillets', 'chamfers', 'pockets', 'boss', 'shell',
                      'smart_fillet', 'flange_holes'}
@@ -152,9 +166,24 @@ def _rebuild_code_line(block_type, params, parent_id):
         args = ", ".join(str(v) for v in params.values())
         return f"{parent_var} = FEATURE_MAP['{block_type}']({parent_var}, {args})"
     else:
-        args = ", ".join(str(v) for v in params.values())
-        block_id = "001"  # Base blocks always b001
-        return f"b{block_id} = BASE_TEMPLATES['{block_type}']({args})"
+        # Separate base params from x, y, z
+        base_args = []
+        x, y, z = 0.0, 0.0, 0.0
+        for k, v in params.items():
+            if k == 'x': x = float(v)
+            elif k == 'y': y = float(v)
+            elif k == 'z': z = float(v)
+            else: base_args.append(str(v))
+            
+        args_str = ", ".join(base_args)
+        code_line = f"b{block_id} = BASE_TEMPLATES['{block_type}']({args_str})"
+        
+        if x != 0 or y != 0 or z != 0:
+            code_line += f".translate(({x}, {y}, {z}))"
+            
+        if parent_id and parent_id != block_id:
+            code_line += f"\n{parent_var} = {parent_var}.union(b{block_id})"
+        return code_line
 
 
 # ---------------------------------------------------------------------------
@@ -166,18 +195,35 @@ def add_block_to_script(script: str, block_type: str, params: dict,
     """Append a new template block to an existing script."""
     blocks = parse_blocks(script)
     new_id = str(len(blocks) + 1).zfill(3)
-    parent_var = f"b{parent_id}" if parent_id else "b001"
+    parent_var = _resolve_parent_var(blocks, parent_id)
 
     FEATURE_TYPES = {'holes', 'fillets', 'chamfers', 'pockets', 'boss', 'shell',
                      'smart_fillet', 'flange_holes'}
 
-    params_raw = ",".join(str(v) for v in params.values())
-    args = ", ".join(str(v) for v in params.values())
-
     if block_type in FEATURE_TYPES:
+        args = ", ".join(str(v) for v in params.values())
         code_line = f"{parent_var} = FEATURE_MAP['{block_type}']({parent_var}, {args})"
     else:
-        code_line = f"b{new_id} = BASE_TEMPLATES['{block_type}']({args})"
+        # Extract x,y,z if present (or default to 0)
+        x = float(params.pop('x', 0.0))
+        y = float(params.pop('y', 0.0))
+        z = float(params.pop('z', 0.0))
+        # Reconstruct params dict to include them for raw string
+        params['x'] = x
+        params['y'] = y
+        params['z'] = z
+        params_raw = ",".join(str(v) for v in params.values())
+        
+        # Base arguments
+        base_args = ", ".join(str(v) for k, v in params.items() if k not in ('x', 'y', 'z'))
+        
+        code_line = f"b{new_id} = BASE_TEMPLATES['{block_type}']({base_args})"
+        if x != 0 or y != 0 or z != 0:
+            code_line += f".translate(({x}, {y}, {z}))"
+        code_line += "\n"
+        
+        # Union the new block with the parent so it appears in the final model
+        code_line += f"{parent_var} = {parent_var}.union(b{new_id})"
 
     tag_line = f"# [BLOCK_{new_id}] type={block_type} params={params_raw} parent={parent_id} face={face_selector}"
     new_block = f"\n{tag_line}\n{code_line}\n"
@@ -249,9 +295,8 @@ def assemble_block_script(form_data: dict, params: dict) -> str:
     boss_height = float(params.get("boss_height") or 5.0)
 
     # ── BUILD TAGGED BLOCK SCRIPT ──
+    # NOTE: import sys / sys.path.insert is handled by execute_cadquery header
     lines = [
-        "import sys",
-        r"sys.path.insert(0, r'H:\DesignOS')",
         "import cadquery as cq",
         "from templates import BASE_TEMPLATES, FEATURE_MAP",
         "",
@@ -270,9 +315,11 @@ def assemble_block_script(form_data: dict, params: dict) -> str:
         lines.append(f"# [BLOCK_{bid}] type=i_beam params={p_raw}")
         lines.append(f"b{bid} = BASE_TEMPLATES['i_beam']({height}, {width}, {length}, {wall_t}, {round(wall_t * 1.5, 2)})")
     elif part_type == "shaft":
-        p_raw = f"{width},{length}"
-        lines.append(f"# [BLOCK_{bid}] type=shaft params={p_raw}")
-        lines.append(f"b{bid} = BASE_TEMPLATES['shaft']({width}, {length})")
+        d1, l1 = width, length * 0.6
+        d2, l2 = width * 1.5, length * 0.4
+        p_raw = f"{d1},{l1},{d2},{l2}"
+        lines.append(f"# [BLOCK_{bid}] type=two_stage_parallel_shaft params={p_raw}")
+        lines.append(f"b{bid} = BASE_TEMPLATES['two_stage_parallel_shaft']({d1}, {l1}, {d2}, {l2})")
     elif part_type == "housing":
         p_raw = f"{length},{width},{height},{wall_t}"
         lines.append(f"# [BLOCK_{bid}] type=housing params={p_raw}")
