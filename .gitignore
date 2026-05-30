@@ -9,3 +9,6 @@ venv/
 .venv/
 env/
 temp/
+venv2/
+get-pip.py
+rewrite_ui.py

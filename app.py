@@ -834,12 +834,15 @@ Rules:
 - When adding features (e.g., gears, flanges), use standard primitives (.circle().extrude()) and .union() them to the main body.
 - No markdown, no explanation, pure Python only"""
 
-    raw = call_ollama(QWEN_MODEL, ASSIST_PROMPT, "")
-    script = extract_python_code(raw)
-    safe, reason = validate_script_safety(script)
-    if not safe:
-        return jsonify({"error": f"AI generated unsafe script: {reason}"}), 400
-    return jsonify({"script": script})
+    try:
+        raw = call_ollama(QWEN_MODEL, ASSIST_PROMPT, "")
+        script = extract_python_code(raw)
+        safe, reason = validate_script_safety(script)
+        if not safe:
+            return jsonify({"error": f"AI generated unsafe script: {reason}"}), 400
+        return jsonify({"script": script})
+    except Exception as exc:
+        return jsonify({"error": f"AI unavailable: {exc}"}), 503
 
 # ---------------------------------------------------------------------------
 # Canvas — Block-based assembly endpoints
@@ -856,9 +859,12 @@ def create_canvas_session():
     form_data = data.get("form_data", {})
     source_job = data.get("source_job", "")
 
-    # Get params from Qwen
+    # Get params from Qwen (fallback to safe defaults if Ollama is down)
     spec = build_spec_string(form_data)
-    params = get_params_from_qwen(spec)
+    try:
+        params = get_params_from_qwen(spec)
+    except Exception:
+        params = {}
 
     # Build tagged block script
     script = assemble_block_script(form_data, params)

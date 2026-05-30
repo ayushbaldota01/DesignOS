@@ -1,1552 +1,512 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>DesignOS ΓÇö AI-Powered Text-to-CAD</title>
-  <meta name="description" content="Local AI-powered CAD generation using Ollama LLMs and CadQuery." />
-
-  <!-- Fonts -->
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-
-  <!-- Three.js import map -->
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DesignOS — AI-Powered CAD</title>
+  <meta name="description" content="DesignOS: Professional AI-powered parametric CAD design platform">
+  <link rel="stylesheet" href="/static/ide.css">
+  <script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.44.0/min/vs/loader.js"></script>
   <script type="importmap">
   {
     "imports": {
-      "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
-      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+      "three": "https://cdn.jsdelivr.net/npm/three@0.161.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.161.0/examples/jsm/"
     }
   }
   </script>
-
-  <style>
-    /* ================================================================
-       DESIGN SYSTEM ΓÇö DesignOS
-       Dark, minimal, engineering-forward. No gradients, no animations.
-       ================================================================ */
-
-    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
-
-    :root {
-      /* Surface palette */
-      --bg-root:       #0b0d11;
-      --bg-primary:    #12141a;
-      --bg-secondary:  #181b22;
-      --bg-tertiary:   #1e222b;
-      --bg-input:      #151820;
-
-      /* Border */
-      --border:        #2a2e38;
-      --border-focus:  #4ea8de;
-
-      /* Text */
-      --text-primary:  #cdd6e4;
-      --text-secondary:#8892a4;
-      --text-muted:    #5a6374;
-      --text-accent:   #4ea8de;
-
-      /* Status */
-      --status-ok:     #3fb950;
-      --status-err:    #f85149;
-      --status-warn:   #d29922;
-      --status-run:    #4ea8de;
-
-      /* Fonts */
-      --font-ui:   'Inter', system-ui, -apple-system, sans-serif;
-      --font-mono: 'JetBrains Mono', 'Cascadia Code', 'Fira Code', monospace;
-
-      /* Sizing */
-      --radius:     4px;
-      --sidebar-w:  340px;
-    }
-
-    html, body {
-      height: 100%;
-      background: var(--bg-root);
-      color: var(--text-primary);
-      font-family: var(--font-ui);
-      font-size: 13px;
-      line-height: 1.5;
-      overflow: hidden;
-    }
-
-    /* ---- LAYOUT ---- */
-    #app {
-      display: grid;
-      grid-template-rows: 48px 1fr;
-      grid-template-columns: var(--sidebar-w) 1fr;
-      grid-template-areas:
-        "header  header"
-        "sidebar main";
-      height: 100vh;
-    }
-
-    /* ---- HEADER ---- */
-    #header {
-      grid-area: header;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 0 20px;
-      background: var(--bg-primary);
-      border-bottom: 1px solid var(--border);
-      z-index: 10;
-    }
-    #header .brand {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-    }
-    #header .brand svg { width: 22px; height: 22px; }
-    #header .brand h1 {
-      font-size: 15px;
-      font-weight: 700;
-      letter-spacing: 1.2px;
-      color: var(--text-primary);
-    }
-    #header .brand span {
-      font-size: 10px;
-      font-weight: 500;
-      color: var(--text-muted);
-      letter-spacing: 0.5px;
-      padding: 2px 6px;
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-    }
-    .health-indicators {
-      display: flex;
-      gap: 14px;
-      align-items: center;
-    }
-    .health-dot {
-      display: flex;
-      align-items: center;
-      gap: 5px;
-      font-size: 11px;
-      font-family: var(--font-mono);
-      color: var(--text-secondary);
-    }
-    .health-dot .dot {
-      width: 7px; height: 7px;
-      border-radius: 50%;
-      background: var(--text-muted);
-    }
-    .health-dot .dot.ok   { background: var(--status-ok); }
-    .health-dot .dot.fail { background: var(--status-err); }
-
-    /* ---- SIDEBAR ---- */
-    #sidebar {
-      grid-area: sidebar;
-      background: var(--bg-primary);
-      border-right: 1px solid var(--border);
-      overflow-y: auto;
-      display: flex;
-      flex-direction: column;
-    }
-    
-    /* Sidebar Tabs */
-    .sidebar-tabs {
-      display: flex;
-      border-bottom: 1px solid var(--border);
-      background: var(--bg-secondary);
-      flex-shrink: 0;
-    }
-    .tab-btn {
-      flex: 1;
-      padding: 12px 0;
-      background: transparent;
-      border: none;
-      color: var(--text-muted);
-      font-size: 11px;
-      font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-      cursor: pointer;
-      border-bottom: 2px solid transparent;
-      transition: all 0.2s;
-    }
-    .tab-btn:hover {
-      color: var(--text-secondary);
-    }
-    .tab-btn.active {
-      color: var(--text-accent);
-      border-bottom-color: var(--text-accent);
-    }
-    
-    #ai-panel {
-      flex: 1;
-      overflow-y: auto;
-      display: flex;
-      flex-direction: column;
-    }
-    
-    #editor-panel {
-      flex: 1;
-      display: flex;
-      flex-direction: column;
-      overflow: hidden;
-    }
-    
-    #script-editor {
-      flex: 1;
-      width: 100%;
-      resize: none;
-      background: var(--bg-input);
-      color: var(--text-primary);
-      border: none;
-      padding: 14px;
-      font-family: var(--font-mono);
-      font-size: 12px;
-      line-height: 1.5;
-      outline: none;
-      white-space: pre;
-    }
-
-    .panel-section {
-      padding: 16px 18px;
-      border-bottom: 1px solid var(--border);
-    }
-    .panel-section:last-child { border-bottom: none; }
-    .panel-section h2 {
-      font-size: 10px;
-      font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 1.4px;
-      color: var(--text-muted);
-      margin-bottom: 12px;
-    }
-
-    /* Form elements */
-    label {
-      display: block;
-      font-size: 11px;
-      font-weight: 500;
-      color: var(--text-secondary);
-      margin-bottom: 4px;
-    }
-    select, input[type="number"], input[type="text"] {
-      width: 100%;
-      padding: 7px 10px;
-      background: var(--bg-input);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      color: var(--text-primary);
-      font-family: var(--font-mono);
-      font-size: 12px;
-      outline: none;
-      margin-bottom: 10px;
-    }
-    select:focus, input:focus {
-      border-color: var(--border-focus);
-    }
-    select {
-      cursor: pointer;
-      -webkit-appearance: none;
-      appearance: none;
-      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%235a6374'/%3E%3C/svg%3E");
-      background-repeat: no-repeat;
-      background-position: right 10px center;
-      padding-right: 28px;
-    }
-    input[type="number"] { -moz-appearance: textfield; }
-    input[type="number"]::-webkit-inner-spin-button,
-    input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; }
-
-    .dim-row {
-      display: grid;
-      grid-template-columns: 1fr 1fr 1fr;
-      gap: 8px;
-    }
-    .dim-row label { text-align: center; }
-    .dim-row input { text-align: center; }
-
-    /* Checkboxes */
-    .checkbox-grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 6px 12px;
-    }
-    .cb-item {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      cursor: pointer;
-    }
-    .cb-item input[type="checkbox"] {
-      width: 14px; height: 14px;
-      margin: 0;
-      accent-color: var(--text-accent);
-      cursor: pointer;
-    }
-    .cb-item span {
-      font-size: 12px;
-      color: var(--text-secondary);
-    }
-
-    /* Buttons */
-    .btn-primary {
-      width: 100%;
-      padding: 10px 0;
-      background: var(--text-accent);
-      color: #0b0d11;
-      border: none;
-      border-radius: var(--radius);
-      font-family: var(--font-ui);
-      font-size: 12px;
-      font-weight: 600;
-      letter-spacing: 0.8px;
-      text-transform: uppercase;
-      cursor: pointer;
-    }
-    .btn-primary:hover { opacity: 0.88; }
-    .btn-primary:disabled {
-      opacity: 0.35;
-      cursor: not-allowed;
-    }
-
-    .btn-secondary {
-      width: 100%;
-      padding: 8px 0;
-      background: transparent;
-      color: var(--text-accent);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      font-family: var(--font-ui);
-      font-size: 11px;
-      font-weight: 500;
-      letter-spacing: 0.5px;
-      cursor: pointer;
-      margin-top: 8px;
-    }
-    .btn-secondary:hover { border-color: var(--text-accent); }
-    .btn-secondary:disabled { opacity: 0.35; cursor: not-allowed; }
-
-    /* ---- MAIN AREA ---- */
-    #main {
-      grid-area: main;
-      display: grid;
-      grid-template-rows: 1fr 220px;
-      overflow: hidden;
-    }
-
-    /* 3-D Viewer */
-    #viewer-wrap {
-      position: relative;
-      background: var(--bg-root);
-      overflow: hidden;
-    }
-    #viewer-canvas {
-      width: 100%;
-      height: 100%;
-    }
-    #viewer-overlay {
-      position: absolute;
-      top: 0; left: 0; right: 0; bottom: 0;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      pointer-events: none;
-    }
-    #viewer-overlay .empty-state {
-      text-align: center;
-      color: var(--text-muted);
-    }
-    #viewer-overlay .empty-state svg {
-      width: 48px; height: 48px;
-      margin-bottom: 10px;
-      opacity: 0.3;
-    }
-    #viewer-overlay .empty-state p {
-      font-size: 12px;
-      letter-spacing: 0.4px;
-    }
-    .viewer-toolbar {
-      position: absolute;
-      top: 12px;
-      right: 12px;
-      display: flex;
-      gap: 6px;
-    }
-    .viewer-toolbar button {
-      padding: 5px 10px;
-      background: var(--bg-tertiary);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      color: var(--text-secondary);
-      font-family: var(--font-mono);
-      font-size: 10px;
-      cursor: pointer;
-    }
-    .viewer-toolbar button:hover { color: var(--text-primary); border-color: var(--text-accent); }
-
-    /* Generation status bar */
-    #status-bar {
-      position: absolute;
-      bottom: 12px; left: 12px; right: 12px;
-      display: none;
-      align-items: center;
-      gap: 10px;
-      padding: 8px 14px;
-      background: var(--bg-tertiary);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-    }
-    #status-bar.visible { display: flex; }
-    #status-bar .spinner {
-      width: 14px; height: 14px;
-      border: 2px solid var(--border);
-      border-top-color: var(--text-accent);
-      border-radius: 50%;
-      animation: spin 0.8s linear infinite;
-    }
-    @keyframes spin { to { transform: rotate(360deg); } }
-    #status-bar .status-text {
-      font-size: 11px;
-      font-family: var(--font-mono);
-      color: var(--text-secondary);
-      flex: 1;
-    }
-    #status-bar .attempt-badge {
-      font-size: 10px;
-      font-family: var(--font-mono);
-      padding: 2px 8px;
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      color: var(--text-muted);
-    }
-
-    /* ---- LOG PANEL ---- */
-    #log-panel {
-      background: var(--bg-primary);
-      border-top: 1px solid var(--border);
-      display: flex;
-      flex-direction: column;
-    }
-    #log-panel .log-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 8px 16px;
-      border-bottom: 1px solid var(--border);
-    }
-    #log-panel .log-header h3 {
-      font-size: 10px;
-      font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 1.2px;
-      color: var(--text-muted);
-    }
-    #download-btn {
-      padding: 5px 14px;
-      background: var(--status-ok);
-      color: #0b0d11;
-      border: none;
-      border-radius: var(--radius);
-      font-family: var(--font-ui);
-      font-size: 11px;
-      font-weight: 600;
-      cursor: pointer;
-      display: none;
-    }
-    #download-btn:hover { opacity: 0.88; }
-    #log-entries {
-      flex: 1;
-      overflow-y: auto;
-      padding: 8px 16px;
-      font-family: var(--font-mono);
-      font-size: 11px;
-      line-height: 1.7;
-    }
-    .log-line {
-      display: flex;
-      gap: 8px;
-      align-items: flex-start;
-    }
-    .log-line .log-icon {
-      flex-shrink: 0;
-      width: 14px;
-      text-align: center;
-      margin-top: 2px;
-    }
-    .log-line .log-msg { color: var(--text-secondary); }
-    .log-line.running .log-icon { color: var(--status-run); }
-    .log-line.done    .log-icon { color: var(--status-ok); }
-    .log-line.error   .log-icon { color: var(--status-err); }
-    .log-detail {
-      margin: 2px 0 6px 22px;
-      padding: 6px 10px;
-      background: var(--bg-secondary);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      font-size: 10px;
-      color: var(--text-muted);
-      max-height: 80px;
-      overflow-y: auto;
-      white-space: pre-wrap;
-      word-break: break-all;
-    }
-
-    /* Refine bar */
-    #refine-section {
-      display: none;
-      padding: 12px 18px;
-      border-bottom: 1px solid var(--border);
-    }
-    #refine-section.visible { display: block; }
-    #refine-section .refine-row {
-      display: flex;
-      gap: 8px;
-    }
-    #refine-section input {
-      flex: 1;
-      margin-bottom: 0;
-    }
-    #refine-section button {
-      flex-shrink: 0;
-      padding: 7px 14px;
-      background: var(--bg-tertiary);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      color: var(--text-accent);
-      font-family: var(--font-ui);
-      font-size: 11px;
-      font-weight: 500;
-      cursor: pointer;
-    }
-    #refine-section button:hover { border-color: var(--text-accent); }
-
-    /* Scrollbars */
-    ::-webkit-scrollbar { width: 6px; }
-    ::-webkit-scrollbar-track { background: transparent; }
-    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
-    ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
-  </style>
-  <script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.44.0/min/vs/loader.js"></script>
-  <link rel="stylesheet" href="/static/ide.css">
 </head>
 <body>
 
-<div id="app">
-
-  <!-- ==================== HEADER ==================== -->
-  <header id="header">
-    <div class="brand">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M12 2L2 7l10 5 10-5-10-5z"/>
-        <path d="M2 17l10 5 10-5"/>
-        <path d="M2 12l10 5 10-5"/>
-      </svg>
-      <h1>DESIGNOS</h1>
-      <span>LOCAL AI ┬╖ CAD</span>
-    </div>
-    <span class="mode-indicator" id="modeIndicator" style="margin-right:auto; margin-left: 20px;">FORM MODE</span>
-    <div class="header-right" style="display:flex; gap:12px; margin-right: 20px; align-items:center;">
-      <span id="runStatus" class="run-status"></span>
-      <button id="toggleScript" class="btn-secondary" style="display:none; margin:0;">Show Script</button>
-    </div>
-    <div class="health-indicators" id="health-indicators">
-      <div class="health-dot"><span class="dot" id="dot-ollama"></span>Ollama</div>
-      <div class="health-dot"><span class="dot" id="dot-qwen"></span>Qwen</div>
-      <div class="health-dot"><span class="dot" id="dot-cadquery"></span>CadQuery</div>
-      <div class="health-dot"><span class="dot" id="dot-gpu"></span><span id="gpu-label">GPU</span></div>
-    </div>
-  </header>
-
-  <!-- STAGE 1: FORM MODE -->
-<div id="formStage" style="display: contents">
-<!-- ==================== SIDEBAR ==================== -->
-  <aside id="sidebar">
-
-    <!-- Tabs -->
-    <div class="sidebar-tabs">
-      <button class="tab-btn active" id="tab-ai">AI Config</button>
-      <button class="tab-btn" id="tab-editor">Script Editor</button>
-    </div>
-
-    <div id="ai-panel">
-      <!-- Part type -->
-      <div class="panel-section">
-      <h2>Part Definition</h2>
-      <label for="part-type">Part Type</label>
-      <select id="part-type">
-        <option value="Bracket">Bracket</option>
-        <option value="Plate">Plate</option>
-        <option value="Shaft">Shaft</option>
-        <option value="Beam">I-Beam</option>
-        <option value="Housing">Housing</option>
-        <option value="Gear">Gear</option>
-        <option value="Flange">Flange</option>
-        <option value="Custom">Custom</option>
-      </select>
-    </div>
-
-    <!-- Dimensions -->
-    <div class="panel-section">
-      <h2>Dimensions (mm)</h2>
-      <div class="dim-row">
-        <div>
-          <label for="dim-l">Length</label>
-          <input type="number" id="dim-l" value="100" min="1" step="1" />
-        </div>
-        <div>
-          <label for="dim-w">Width</label>
-          <input type="number" id="dim-w" value="60" min="1" step="1" />
-        </div>
-        <div>
-          <label for="dim-h">Height</label>
-          <input type="number" id="dim-h" value="20" min="1" step="1" />
-        </div>
-      </div>
-      <div id="warningPanel" class="warning-panel"></div>
-    </div>
-
-    <!-- Features -->
-    <div class="panel-section">
-      <h2>Features</h2>
-      <div class="checkbox-grid">
-        <label class="cb-item"><input type="checkbox" id="feat-holes" checked /><span>Holes</span></label>
-        <label class="cb-item"><input type="checkbox" id="feat-fillets" checked /><span>Fillets</span></label>
-        <label class="cb-item"><input type="checkbox" id="feat-chamfers" /><span>Chamfers</span></label>
-        <label class="cb-item"><input type="checkbox" id="feat-pockets" /><span>Pockets</span></label>
-        <label class="cb-item"><input type="checkbox" id="feat-shell" /><span>Shell</span></label>
-        <label class="cb-item"><input type="checkbox" id="feat-boss" /><span>Boss</span></label>
-      </div>
-    </div>
-
-    <!-- Material -->
-    <div class="panel-section">
-      <h2>Material</h2>
-      <label for="material">Material</label>
-      <select id="material">
-        <option value="Steel">Steel</option>
-        <option value="Aluminium" selected>Aluminium</option>
-        <option value="PLA">PLA (3D Print)</option>
-        <option value="Brass">Brass</option>
-        <option value="Titanium">Titanium</option>
-        <option value="Nylon">Nylon</option>
-      </select>
-    </div>
-
-    <!-- Notes -->
-    <div class="panel-section">
-      <h2>Custom Notes</h2>
-      <label for="notes">Additional instructions</label>
-      <input type="text" id="notes" placeholder="e.g. Add 4 M6 mounting holes at corners" />
-    </div>
-
-    <!-- Generate -->
-    <div class="panel-section">
-      <button class="btn-primary" id="btn-generate">Γû╢&ensp;GENERATE</button>
-      <button class="btn-secondary" id="btn-clear">CLEAR</button>
-    </div>
-
-      <!-- Refine (shown after successful generation) -->
-      <div id="refine-section">
-        <h2 style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:1.4px;color:var(--text-muted);margin-bottom:8px;">Refine Design</h2>
-        <div class="refine-row">
-          <input type="text" id="refine-input" placeholder="e.g. Make holes larger" />
-          <button id="btn-refine">REFINE</button>
-        </div>
-      </div>
-    </div> <!-- End ai-panel -->
-
-    <!-- Editor Panel -->
-    <div id="editor-panel" style="display: none;">
-      <textarea id="script-editor" spellcheck="false" placeholder="import cadquery as cq
-
-# Your code here...
-result = cq.Workplane('XY').box(50, 50, 50)"></textarea>
-      <div class="panel-section" style="border-top: 1px solid var(--border); flex-shrink: 0;">
-        <button class="btn-primary" id="btn-execute-script">Γû╢&ensp;EXECUTE SCRIPT</button>
-      </div>
-    </div>
-
-  </aside>
-
-  <!-- ==================== MAIN ==================== -->
-  <main id="main">
-
-    <!-- 3-D Viewer -->
-    <div id="viewer-wrap">
-      <div id="viewer-canvas"></div>
-
-      <div id="viewer-overlay">
-        <div class="empty-state" id="empty-state">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>
-            <polyline points="3.27 6.96 12 12.01 20.73 6.96"/>
-            <line x1="12" y1="22.08" x2="12" y2="12"/>
-          </svg>
-          <p>Configure your part and hit GENERATE</p>
-        </div>
-      </div>
-
-      <div class="viewer-toolbar" id="viewer-toolbar" style="display:none;">
-        <button id="btn-reset-cam">RESET VIEW</button>
-        <button id="btn-wireframe">WIREFRAME</button>
-      </div>
-
-      <div id="status-bar">
-        <div class="spinner"></div>
-        <span class="status-text" id="status-text">Initialising ΓÇª</span>
-        <span class="attempt-badge" id="attempt-badge">1 / 3</span>
-      </div>
-    </div>
-
-    <!-- Log Panel -->
-    <div id="log-panel">
-      <div class="log-header">
-        <h3>Generation Log</h3>
-        <button id="download-btn">Γ¼ç&ensp;Download STEP</button>
-      </div>
-      <div id="log-entries">
-        <div class="log-line" style="color:var(--text-muted);">Waiting for generation ΓÇª</div>
-      </div>
-      <div id="generationLog" class="generation-log"></div>
-    </div>
-
-  </main>
-</div> <!-- End formStage -->
-
-<!-- STAGE 2: EDIT MODE -->
-<div id="editStage" class="stage" style="display:none; grid-column: 1 / -1; width: 100%;">
-  <div class="edit-layout">
-    <div class="slider-panel" id="sliderPanel">
-      <div class="panel-title">PARAMETERS</div>
-      <div id="slidersContainer"></div>
-      
-      <div class="component-library">
-          <div class="panel-title">ADD FEATURE</div>
-          <div class="library-grid">
-              <button onclick="addFeature('gear')">⚙️ Gear</button>
-              <button onclick="addFeature('flange')">🔩 Flange</button>
-              <button onclick="addFeature('hole_pattern')">🕳️ Holes</button>
-              <button onclick="addFeature('pocket')">🟩 Pocket</button>
-          </div>
-      </div>
-
-      <button class="btn-back" id="backBtn">← New Part</button>
-      <div class="history-panel">
-          <div class="panel-title">HISTORY</div>
-          <div id="historyList"></div>
-      </div>
-    </div>
-    <div class="viewer-panel" id="editViewerContainer">
-      <div class="viewer-toolbar-edit">
-          <button id="measureToggle" class="btn-viewer" title="Measure">📏</button>
-      </div>
-      <div id="viewerCanvas" style="width:100%; height:100%;"></div>
-      <div id="facePopup" class="face-popup" style="display:none">
-        <div class="popup-title" id="popupTitle">TOP FACE</div>
-        <button onclick="faceAction('Add holes here')">+ Holes</button>
-        <button onclick="faceAction('Add pocket here')">+ Pocket</button>
-        <button onclick="faceAction('Add fillet to all edges')">+ Fillet</button>
-        <button onclick="faceAction('Add boss here')">+ Boss</button>
-        <button class="btn-close" onclick="closePopup()">✕</button>
-      </div>
-      <div id="editPanel" class="edit-panel" style="display:none">
-          <div class="edit-panel-title" id="editPanelTitle">SELECTED FEATURE</div>
-          <div id="editFields"></div>
-          <div style="display:flex;gap:8px;margin-top:12px;">
-              <button class="btn-assist" onclick="applyGeometryEdit()" style="flex:1">Apply →</button>
-              <button class="btn-undo" onclick="closeEditPanel()">✕</button>
-          </div>
-      </div>
-    </div>
-    <div class="script-panel" id="scriptPanel" style="display:none">
-      <div class="panel-title" style="padding:16px;">SCRIPT</div>
-      <div id="monacoEditor" style="height:100%"></div>
-    </div>
+<!-- ═══════════════════════════════════════════════════════════════
+     APP BAR
+     ═══════════════════════════════════════════════════════════════ -->
+<div class="app-bar">
+  <div class="app-logo">
+    <span class="logo-icon">⬡</span>
+    <span class="logo-text">Design<span>OS</span></span>
   </div>
-  <div class="ai-panel">
-    <span class="ai-label">AI ›</span>
-    <input type="text" id="aiInput" class="ai-input" placeholder='e.g. "add 4 M6 holes on top face"'/>
-    <button id="aiBtn" class="btn-assist">MODIFY</button>
-    <button id="undoBtn" class="btn-undo" onclick="undoScript()" disabled>↩ Undo</button>
-    <span id="aiStatus" class="ai-status"></span>
+  <div class="menu-group">
+    <div class="menu-item" onclick="showToast('File menu — coming soon')">File ▾</div>
+    <div class="menu-item" onclick="showToast('Edit menu — coming soon')">Edit ▾</div>
+    <div class="menu-item" onclick="showToast('View menu — coming soon')">View ▾</div>
+    <div class="menu-item" onclick="showToast('Insert menu — coming soon')">Insert ▾</div>
+  </div>
+  <div class="app-bar-right">
+    <button class="btn-app" onclick="showToast('Save — coming soon')">Save</button>
+    <button class="btn-app" onclick="exportSTEP()">Export STEP</button>
+    <button class="btn-app-primary" onclick="exportSTL()">Export STL</button>
   </div>
 </div>
 
-<!-- STAGE 3: CANVAS MODE -->
-<div id="canvasStage" class="stage" style="display:none; grid-column: 1 / -1; width: 100%; flex-direction: column;">
-  <div class="canvas-header">
-    <span class="canvas-title">CANVAS</span>
-    <span class="canvas-session">session: <span id="canvasSessionId">—</span></span>
-    <span id="canvasStatus" class="canvas-status">Ready</span>
-    <div class="canvas-header-right">
-      <button class="btn-secondary" onclick="undoCanvas()">↩ Undo</button>
-      <button class="btn-secondary" onclick="toggleCanvasScript()">Script ↗</button>
-      <button class="btn-assist" onclick="exportCanvasSTEP()">↓ Export STEP</button>
-      <button class="btn-back" onclick="canvasBackToForm()" style="width:auto;margin:0">← New Part</button>
-    </div>
+<!-- ═══════════════════════════════════════════════════════════════
+     TAB BAR
+     ═══════════════════════════════════════════════════════════════ -->
+<div class="tab-bar">
+  <div class="tab" id="tabManual" onclick="switchTab('manual')">
+    <span class="tab-icon">✏</span> Manual 2D/3D
   </div>
-  <!-- New Top Toolbar -->
-  <div class="canvas-toolbar">
-    <div class="toolbar-group">
-      <span class="toolbar-label">STRUCTURAL</span>
-      <button class="tool-btn" onclick="addGeometry('bracket')"><span class="tool-icon">L</span> Bracket</button>
-      <button class="tool-btn" onclick="addGeometry('plate')"><span class="tool-icon">□</span> Plate</button>
-      <button class="tool-btn" onclick="addGeometry('channel')"><span class="tool-icon">U</span> Channel</button>
-      <button class="tool-btn" onclick="addGeometry('i_beam')"><span class="tool-icon">I</span> Beam</button>
-      <button class="tool-btn" onclick="addGeometry('flange')"><span class="tool-icon">◎</span> Flange</button>
-    </div>
-    
-    <div class="toolbar-group">
-      <span class="toolbar-label">FEATURES</span>
-      <button class="tool-btn" onclick="addGeometry('holes')"><span class="tool-icon">○</span> Holes</button>
-      <button class="tool-btn" onclick="addGeometry('fillets')"><span class="tool-icon">⌒</span> Fillet</button>
-      <button class="tool-btn" onclick="addGeometry('chamfers')"><span class="tool-icon">/</span> Chamfer</button>
-      <button class="tool-btn" onclick="addGeometry('pockets')"><span class="tool-icon">▽</span> Pocket</button>
-      <button class="tool-btn" onclick="addGeometry('boss')"><span class="tool-icon">⬆</span> Boss</button>
-    </div>
-    
-    <div class="toolbar-group">
-      <span class="toolbar-label">ROTATIONAL</span>
-      <button class="tool-btn" onclick="addGeometry('shaft')"><span class="tool-icon">|</span> Shaft</button>
-      <button class="tool-btn" onclick="addGeometry('gear')"><span class="tool-icon">⚙</span> Gear</button>
-    </div>
-    
-    <div class="toolbar-divider"></div>
-    <div class="toolbar-group face-group">
-      <span class="toolbar-label">TARGET FACE</span>
-      <div id="canvasFaceSelectorLabel" class="face-selector-label" onclick="clearFaceSelection()" title="Click to clear selection">None (Free Space)</div>
-    </div>
+  <div class="tab active" id="tabPrompt" onclick="switchTab('prompt')">
+    <span class="tab-icon">◆</span> Prompt to Geometry
   </div>
-
-  <div class="canvas-layout">
-    <!-- Left: Assembly Tree -->
-    <div class="left-sidebar">
-      <div class="assembly-tree">
-        <div class="panel-title">BROWSER (ASSEMBLY)</div>
-        <div id="assemblyTree"></div>
-      </div>
-    </div>
-
-    <!-- Center: 3D Viewer -->
-    <div class="canvas-viewer-panel">
-      <div id="canvasViewerContainer" style="width:100%;height:100%;"></div>
-    </div>
-
-    <!-- Right: Params -->
-    <div class="right-sidebar">
-      <div id="paramPanel" class="param-panel">
-        <div class="param-panel-empty">Click a block in the browser to edit its properties</div>
-      </div>
-    </div>
-  </div>
-
-  <!-- Script panel (hidden by default) -->
-  <div id="canvasScriptPanel" class="canvas-script-panel" style="display:none">
-    <div class="panel-title" style="padding:12px 16px">LIVE SCRIPT</div>
-    <pre id="canvasScriptView" class="canvas-script-view"></pre>
+  <div class="tab" id="tabEditor" onclick="switchTab('editor')">
+    <span class="tab-icon">{ }</span> Script Editor
   </div>
 </div>
 
-</div> <!-- end #app -->
-
-
-<!-- ==================== APPLICATION LOGIC ==================== -->
-<script type="module">
-import { CADViewer } from "/static/viewer.js";
-
-// ----- Elements -----
-const btnGenerate   = document.getElementById("btn-generate");
-const btnClear      = document.getElementById("btn-clear");
-const btnDownload   = document.getElementById("download-btn");
-const btnResetCam   = document.getElementById("btn-reset-cam");
-const btnWireframe  = document.getElementById("btn-wireframe");
-const btnRefine     = document.getElementById("btn-refine");
-const refineInput   = document.getElementById("refine-input");
-const refineSection = document.getElementById("refine-section");
-const statusBar     = document.getElementById("status-bar");
-const statusText    = document.getElementById("status-text");
-const attemptBadge  = document.getElementById("attempt-badge");
-const logEntries    = document.getElementById("log-entries");
-const emptyState    = document.getElementById("empty-state");
-const viewerToolbar = document.getElementById("viewer-toolbar");
-
-// Editor UI
-const tabAi         = document.getElementById("tab-ai");
-const tabEditor     = document.getElementById("tab-editor");
-const aiPanel       = document.getElementById("ai-panel");
-const editorPanel   = document.getElementById("editor-panel");
-const scriptEditor  = document.getElementById("script-editor");
-const btnExecute    = document.getElementById("btn-execute-script");
-
-// ----- State -----
-let viewer = null;
-let currentJobId = null;
-let pollTimer = null;
-let wireframeOn = false;
-
-// ----- Initialise Viewer -----
-// Module scripts are deferred, so DOM is ready by the time this runs.
-viewer = new CADViewer("viewer-canvas");
-checkHealth();
-
-// ----- Tab Switching -----
-tabAi.addEventListener("click", () => {
-  tabAi.classList.add("active");
-  tabEditor.classList.remove("active");
-  aiPanel.style.display = "flex";
-  editorPanel.style.display = "none";
-});
-
-tabEditor.addEventListener("click", () => {
-  tabEditor.classList.add("active");
-  tabAi.classList.remove("active");
-  editorPanel.style.display = "flex";
-  aiPanel.style.display = "none";
-});
-
-// ----- Editor Behaviors -----
-scriptEditor.addEventListener("keydown", (e) => {
-  if (e.key === "Tab") {
-    e.preventDefault();
-    const start = scriptEditor.selectionStart;
-    const end = scriptEditor.selectionEnd;
-    scriptEditor.value = scriptEditor.value.substring(0, start) + "    " + scriptEditor.value.substring(end);
-    scriptEditor.selectionStart = scriptEditor.selectionEnd = start + 4;
-  }
-});
-
-// ----- Health Check -----
-async function checkHealth() {
-  try {
-    const r = await fetch("/health");
-    const d = await r.json();
-    setDot("dot-ollama",  d.ollama);
-    setDot("dot-qwen",    d.qwen);
-    setDot("dot-cadquery", d.cadquery);
-    if (d.gpu) {
-      setDot("dot-gpu", true);
-      document.getElementById("gpu-label").textContent = d.gpu.name;
-    } else {
-      setDot("dot-gpu", false);
-    }
-  } catch {
-    ["dot-ollama","dot-qwen","dot-cadquery","dot-gpu"].forEach(id => setDot(id, false));
-  }
-}
-function setDot(id, ok) {
-  const el = document.getElementById(id);
-  el.classList.toggle("ok", !!ok);
-  el.classList.toggle("fail", !ok);
-}
-
-// ----- Dynamic UI Updates -----
-const partTypeSelect = document.getElementById("part-type");
-const labelL = document.querySelector('label[for="dim-l"]');
-const labelW = document.querySelector('label[for="dim-w"]');
-const labelH = document.querySelector('label[for="dim-h"]');
-const containerW = labelW.parentElement;
-const containerH = labelH.parentElement;
-
-partTypeSelect.addEventListener("change", () => {
-  const t = partTypeSelect.value;
-  containerW.style.display = "block";
-  containerH.style.display = "block";
-  labelL.textContent = "Length";
-  labelW.textContent = "Width";
-  labelH.textContent = "Height";
-
-  if (t === "Shaft") {
-    labelL.textContent = "Total Length";
-    labelW.textContent = "Stage 1 Dia.";
-    labelH.textContent = "Stage 2 Dia.";
-  } else if (t === "Gear") {
-    labelL.textContent = "Diameter";
-    containerW.style.display = "none";
-    labelH.textContent = "Thickness";
-  } else if (t === "Bracket") {
-    labelL.textContent = "Base Length";
-    labelW.textContent = "Width";
-    labelH.textContent = "Height";
-  }
-});
-partTypeSelect.dispatchEvent(new Event('change'));
-
-// ----- Build prompt from form -----
-function buildPrompt() {
-  const type = document.getElementById("part-type").value;
-  const l    = document.getElementById("dim-l").value;
-  const w    = document.getElementById("dim-w").value;
-  const h    = document.getElementById("dim-h").value;
-  const mat  = document.getElementById("material").value;
-  const notes = document.getElementById("notes").value.trim();
-
-  const feats = [];
-  if (document.getElementById("feat-holes").checked)    feats.push("mounting holes");
-  if (document.getElementById("feat-fillets").checked)  feats.push("filleted edges");
-  if (document.getElementById("feat-chamfers").checked) feats.push("chamfered edges");
-  if (document.getElementById("feat-pockets").checked)  feats.push("pockets / cutouts");
-  if (document.getElementById("feat-shell").checked)    feats.push("hollow shell");
-  if (document.getElementById("feat-boss").checked)     feats.push("bosses / standoffs");
-
-  let prompt = `Design a ${type} with dimensions ${l}mm (L) ├ù ${w}mm (W) ├ù ${h}mm (H). Material: ${mat}.`;
-  if (feats.length) prompt += ` Features: ${feats.join(", ")}.`;
-  if (notes)        prompt += ` Additional: ${notes}.`;
-  return prompt;
-}
-
-// ----- Generate -----
-btnGenerate.addEventListener("click", async () => {
-  const partType = document.getElementById("part-type").value;
-  const length = document.getElementById("dim-l").value || 100;
-  const width = document.getElementById("dim-w").value || 60;
-  const height = document.getElementById("dim-h").value || 20;
-  const material = document.getElementById("material").value;
-  const notesElement = document.getElementById("notes");
-  const notes = notesElement ? notesElement.value.trim() : "";
-
-  const selectedFeatures = [];
-  if (document.getElementById("feat-holes").checked)    selectedFeatures.push("mounting holes");
-  if (document.getElementById("feat-fillets").checked)  selectedFeatures.push("filleted edges");
-  if (document.getElementById("feat-chamfers").checked) selectedFeatures.push("chamfered edges");
-  if (document.getElementById("feat-pockets").checked)  selectedFeatures.push("pockets / cutouts");
-  if (document.getElementById("feat-shell").checked)    selectedFeatures.push("hollow shell");
-  if (document.getElementById("feat-boss").checked)     selectedFeatures.push("bosses / standoffs");
-
-  btnGenerate.disabled = true;
-  btnDownload.style.display = "none";
-  refineSection.classList.remove("visible");
-  logEntries.innerHTML = "";
-  emptyState.style.display = "none";
-  statusBar.classList.add("visible");
-  statusText.textContent = "Starting generation ΓÇª";
-  attemptBadge.textContent = "1 / 3";
-
-  if (viewer) viewer.clear();
-
-  try {
-    const r = await fetch("/generate", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        prompt: notes || "",
-        part_type: partType,
-        length: parseFloat(length),
-        width: parseFloat(width),
-        height: parseFloat(height),
-        material: material,
-        features: selectedFeatures,
-        notes: notes
-      }),
-    });
-    const d = await r.json();
-    if (d.error) { showError(d.error); return; }
-    currentJobId = d.job_id;
-    const formData = { part_type: partType, length, width, height };
-    connectSSE(d.job_id, onSSELog, (sseData) => {
-      statusBar.classList.remove('visible');
-      btnGenerate.disabled = false;
-      if (sseData.script) {
-        if (typeof pushHistory === 'function') pushHistory(sseData.script);
-        saveToHistory(d.job_id, formData, sseData.script);
-      }
-      onGenerationComplete(d.job_id, sseData.script || '');
-    });
-  } catch (e) {
-    showError("Failed to reach backend: " + e.message);
-  }
-});
-
-// ----- Execute Manual Script -----
-btnExecute.addEventListener("click", async () => {
-  const script = scriptEditor.value.trim();
-  if (!script) return;
-
-  btnExecute.disabled = true;
-  btnDownload.style.display = "none";
-  refineSection.classList.remove("visible");
-  logEntries.innerHTML = "";
-  emptyState.style.display = "none";
-  statusBar.classList.add("visible");
-  statusText.textContent = "Executing script ...";
-  attemptBadge.textContent = "Manual";
-
-  if (viewer) viewer.clear();
-
-  try {
-    const r = await fetch("/execute_raw_script", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ script }),
-    });
-    const d = await r.json();
-    if (d.error) { showError(d.error); btnExecute.disabled = false; return; }
-    currentJobId = d.job_id;
-    connectSSE(d.job_id, onSSELog, (sseData) => {
-      statusBar.classList.remove('visible');
-      btnExecute.disabled = false;
-      if (sseData.script && typeof pushHistory === 'function') pushHistory(sseData.script);
-      onGenerationComplete(d.job_id, sseData.script || '');
-    });
-  } catch (e) {
-    showError("Failed to reach backend: " + e.message);
-    btnExecute.disabled = false;
-  }
-});
-
-function appendLog(entry) {
-  const icons = { running: "Γùî", done: "Γ£ô", error: "Γ£ù" };
-  const div = document.createElement("div");
-  div.className = `log-line ${entry.status}`;
-  div.innerHTML = `<span class="log-icon">${icons[entry.status] || "┬╖"}</span><span class="log-msg">${escHtml(entry.message)}</span>`;
-  logEntries.appendChild(div);
-
-  if (entry.detail) {
-    const det = document.createElement("div");
-    det.className = "log-detail";
-    det.textContent = entry.detail;
-    logEntries.appendChild(det);
-  }
-  logEntries.scrollTop = logEntries.scrollHeight;
-}
-
-function showError(msg) {
-  statusBar.classList.remove("visible");
-  btnGenerate.disabled = false;
-  btnExecute.disabled = false;
-  appendLog({ status: "error", message: msg });
-}
-
-function escHtml(s) {
-  const d = document.createElement("div");
-  d.textContent = s;
-  return d.innerHTML;
-}
-
-// ----- Download -----
-btnDownload.addEventListener("click", () => {
-  if (currentJobId) {
-    window.location.href = `/download/${currentJobId}`;
-  }
-});
-
-// ----- Clear -----
-btnClear.addEventListener("click", () => {
-  if (viewer) viewer.clear();
-  logEntries.innerHTML = '<div class="log-line" style="color:var(--text-muted);">Waiting for generation ΓÇª</div>';
-  btnDownload.style.display = "none";
-  refineSection.classList.remove("visible");
-  emptyState.style.display = "block";
-  document.getElementById("viewer-overlay").style.display = "flex";
-  viewerToolbar.style.display = "none";
-  currentJobId = null;
-  lastLogLen = 0;
-  if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
-});
-
-// ----- Viewer toolbar -----
-btnResetCam.addEventListener("click", () => { if (viewer) viewer.resetCamera(); });
-btnWireframe.addEventListener("click", () => {
-  if (!viewer || !viewer.currentModel) return;
-  wireframeOn = !wireframeOn;
-  viewer.currentModel.material.wireframe = wireframeOn;
-  btnWireframe.textContent = wireframeOn ? "SOLID" : "WIREFRAME";
-});
-
-// ----- Refine -----
-btnRefine.addEventListener("click", async () => {
-  const instruction = refineInput.value.trim();
-  if (!instruction || !currentJobId) return;
-
-  btnRefine.disabled = true;
-  btnDownload.style.display = "none";
-  logEntries.innerHTML = "";
-  lastLogLen = 0;
-  statusBar.classList.add("visible");
-  statusText.textContent = "Refining design ΓÇª";
-
-  try {
-    const r = await fetch("/refine", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ job_id: currentJobId, instruction }),
-    });
-    const d = await r.json();
-    if (d.error) { showError(d.error); btnRefine.disabled = false; return; }
-    currentJobId = d.job_id;
-    connectSSE(d.job_id, onSSELog, (sseData) => {
-      statusBar.classList.remove('visible');
-      btnRefine.disabled = false;
-      if (sseData.script && typeof pushHistory === 'function') pushHistory(sseData.script);
-      onGenerationComplete(d.job_id, sseData.script || '');
-    });
-    refineInput.value = "";
-  } catch (e) {
-    showError("Refine failed: " + e.message);
-    btnRefine.disabled = false;
-  }
-});
-
-// --- NEW PATH B LOGIC ---
-
-window.viewerInstance = null;
-
-window.onGenerationComplete = function(jobId, script) {
-    window.currentScript = script;
-    window.currentJobId = jobId;
-    
-    // Collect form data for canvas session
-    const formData = {
-        part_type: document.getElementById('part-type')?.value || 'plate',
-        length: parseFloat(document.getElementById('dim-l')?.value) || 100,
-        width: parseFloat(document.getElementById('dim-w')?.value) || 60,
-        height: parseFloat(document.getElementById('dim-h')?.value) || 20,
-        material: document.getElementById('material')?.value || 'Steel',
-        features: [],
-        notes: document.getElementById('notes')?.value || ''
-    };
-    // Collect features
-    if (document.getElementById('feat-holes')?.checked) formData.features.push('mounting holes');
-    if (document.getElementById('feat-fillets')?.checked) formData.features.push('filleted edges');
-    if (document.getElementById('feat-chamfers')?.checked) formData.features.push('chamfered edges');
-    if (document.getElementById('feat-pockets')?.checked) formData.features.push('pockets / cutouts');
-    if (document.getElementById('feat-shell')?.checked) formData.features.push('hollow shell');
-    if (document.getElementById('feat-boss')?.checked) formData.features.push('bosses / standoffs');
-    
-    // Launch canvas mode
-    if (typeof initCanvas === 'function') {
-        initCanvas(formData);
-    }
-}
-
-document.getElementById('backBtn').addEventListener('click', () => {
-    document.getElementById('editStage').style.display = 'none';
-    document.getElementById('formStage').style.display = 'grid'; // because #app is grid, but formStage is block, wait. formStage contains #sidebar and #main, it should be display: flex or something. Actually, let's reset to initial.
-    // Wait, #formStage is display: flex if we add a class. But let's just make it display: flex or grid depending on CSS. 
-    // Wait, original #app was grid! I broke the grid layout by wrapping it in formStage!
-    document.getElementById('formStage').style.display = 'contents'; 
-    document.getElementById('modeIndicator').textContent = 'FORM MODE';
-    document.getElementById('toggleScript').style.display = 'none';
-    btnGenerate.disabled = false;
-});
-
-window.runCurrentScript = async function() {
-    document.getElementById('runStatus').textContent = 'Running...';
-    document.getElementById('runStatus').className = 'run-status running';
-    
-    const script = window.monacoInstance ? window.monacoInstance.getValue() : window.currentScript;
-    const res = await fetch('/run-script', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({script})
-    });
-    const d = await res.json();
-    
-    connectSSE(d.job_id, onSSELog, (sseData) => {
-        if (sseData.status === 'failed' || sseData.error) {
-            document.getElementById('runStatus').textContent = 'Error';
-            document.getElementById('runStatus').className = 'run-status error';
-            return;
-        }
-        document.getElementById('runStatus').textContent = 'Updated';
-        document.getElementById('runStatus').className = 'run-status done';
-        window.currentJobId = d.job_id;
-        window.viewerInstance.loadSTL(`/model/${d.job_id}`);
-        if (typeof pushHistory === 'function') pushHistory(sseData.script || script);
-        if (typeof parseSliders === 'function') {
-            const params = parseSliders(sseData.script || script);
-            buildSliders(params, onSliderChange);
-        }
-    });
-}
-
-// AI logic
-async function triggerAI() {
-    const instruction = document.getElementById('aiInput').value.trim();
-    if (!instruction) return;
-    
-    const script = window.monacoInstance ? window.monacoInstance.getValue() : window.currentScript;
-    
-    document.getElementById('aiStatus').textContent = 'Thinking...';
-    document.getElementById('aiBtn').disabled = true;
-    
-    const res = await fetch('/assist', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({
-            instruction,
-            script,
-            face_label: window.clickedFaceLabel || null
-        })
-    });
-    
-    const data = await res.json();
-    
-    if (data.script) {
-        window.currentScript = data.script;
-        if (window.monacoInstance) {
-            window.monacoInstance.setValue(data.script);
-        }
-        if (typeof parseSliders === 'function') {
-            buildSliders(parseSliders(data.script), onSliderChange);
-        }
-        await window.runCurrentScript();
-    }
-    
-    document.getElementById('aiStatus').textContent = '';
-    document.getElementById('aiBtn').disabled = false;
-    document.getElementById('aiInput').value = '';
-}
-
-document.getElementById('aiBtn').addEventListener('click', triggerAI);
-document.getElementById('aiInput').addEventListener('keydown', e => {
-    if (e.key === 'Enter') triggerAI();
-});
-
-window.faceAction = function(action) {
-    window.closePopup();
-    document.getElementById('aiInput').value = `${action} on the ${window.clickedFaceLabel.toLowerCase()}`;
-    triggerAI();
-}
-
-window.closePopup = function() {
-    const popup = document.getElementById('facePopup');
-    if (popup) popup.style.display = 'none';
-}
-
-// ===================== SSE CONNECTION =====================
-function connectSSE(jobId, onLog, onComplete) {
-    const es = new EventSource(`/stream/${jobId}`);
-    es.onmessage = (e) => {
-        const data = JSON.parse(e.data);
-        if (data.complete) {
-            es.close();
-            onComplete(data);
-        } else {
-            onLog(data);
-        }
-    };
-    es.onerror = () => { es.close(); };
-    return es;
-}
-
-// ===================== GRANULAR LOADING =====================
-const STEP_MESSAGES = {
-    "params": "⏳ AI calculating parameters...",
-    "assemble": "⚙️ Assembling geometry from templates...",
-    "execute": "🔧 Executing CadQuery script...",
-    "validate": "✓ Validating geometry...",
-    "complete": "📦 Exporting STEP + STL...",
-    "error": "✗ Generation failed"
-};
-
-function onSSELog(entry) {
-    const msg = STEP_MESSAGES[entry.stage] || entry.message || '';
-    const statusEl = document.getElementById('status-text');
-    if (statusEl) statusEl.textContent = msg;
-    const runStatus = document.getElementById('runStatus');
-    if (runStatus) {
-        runStatus.textContent = msg;
-        runStatus.className = 'run-status ' + (entry.status || '');
-    }
-    const log = document.getElementById('generationLog');
-    if (log) {
-        const line = document.createElement('div');
-        line.className = 'log-line ' + (entry.status || '');
-        line.textContent = msg;
-        log.appendChild(line);
-        log.scrollTop = log.scrollHeight;
-    }
-}
-
-// ===================== CONSTRAINT VALIDATION =====================
-const CONSTRAINTS = {
-    bracket: [
-        { check: (l,w,h) => h < 10, msg: "Height too thin — minimum 10mm for structural integrity" },
-        { check: (l,w,h) => w > l*2, msg: "Width exceeds 2× length — unusual bracket proportion" },
-        { check: (l,w,h) => h > l, msg: "Height exceeds length — consider rotating orientation" }
-    ],
-    plate: [
-        { check: (l,w,h) => h < 3, msg: "Thickness under 3mm — risk of warping during machining" },
-        { check: (l,w,h) => l/h > 50, msg: "Very high aspect ratio — consider ribbing for stiffness" }
-    ],
-    shaft: [
-        { check: (l,w,h) => l/w > 20, msg: "L/D ratio >20 — shaft may deflect under load" },
-        { check: (l,w,h) => w < 5, msg: "Diameter under 5mm — fragile, verify torque requirements" }
-    ],
-    beam: [
-        { check: (l,w,h) => h < w*0.5, msg: "Beam height too low relative to width" }
-    ],
-    housing: [
-        { check: (l,w,h) => Math.min(l,w,h) < 15, msg: "Minimum dimension under 15mm — shell may fail" }
-    ]
-};
-
-function validateInputs() {
-    const typeEl = document.getElementById('part-type');
-    const type = typeEl ? typeEl.value.toLowerCase() : '';
-    const l = parseFloat(document.getElementById('dim-l')?.value) || 0;
-    const w = parseFloat(document.getElementById('dim-w')?.value) || 0;
-    const h = parseFloat(document.getElementById('dim-h')?.value) || 0;
-    const panel = document.getElementById('warningPanel');
-    if (!panel) return;
-    panel.innerHTML = '';
-    const checks = CONSTRAINTS[type] || [];
-    checks.forEach(c => {
-        if (c.check(l, w, h)) {
-            panel.innerHTML += '<div class="warning">⚠ ' + c.msg + '</div>';
-        }
-    });
-}
-
-// Wire constraint validation
-['dim-l','dim-w','dim-h'].forEach(id => {
-    const el = document.getElementById(id);
-    if (el) el.addEventListener('input', validateInputs);
-});
-const ptSelect = document.getElementById('part-type');
-if (ptSelect) ptSelect.addEventListener('change', validateInputs);
-
-// ===================== UNDO STACK =====================
-const scriptHistory = [];
-let historyIndex = -1;
-
-window.pushHistory = function(script) {
-    scriptHistory.splice(historyIndex + 1);
-    scriptHistory.push(script);
-    if (scriptHistory.length > 10) scriptHistory.shift();
-    historyIndex = scriptHistory.length - 1;
-    updateUndoBtn();
-}
-
-window.undoScript = function() {
-    if (historyIndex <= 0) return;
-    historyIndex--;
-    const script = scriptHistory[historyIndex];
-    window.currentScript = script;
-    if (window.monacoInstance) window.monacoInstance.setValue(script);
-    if (typeof parseSliders === 'function') buildSliders(parseSliders(script));
-    runCurrentScript();
-    updateUndoBtn();
-}
-
-function updateUndoBtn() {
-    const btn = document.getElementById('undoBtn');
-    if (!btn) return;
-    btn.disabled = historyIndex <= 0;
-    btn.textContent = '↩ Undo (' + historyIndex + ')';
-}
-
-// ===================== PART HISTORY =====================
-const HISTORY_KEY = 'designos_history';
-
-window.saveToHistory = function(jobId, formData, scriptContent) {
-    const history = JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]');
-    history.unshift({
-        id: jobId,
-        timestamp: Date.now(),
-        label: (formData.part_type||'Part') + ' ' + (formData.length||0) + '×' + (formData.width||0) + '×' + (formData.height||0),
-        script: scriptContent,
-        stlUrl: '/model/' + jobId
-    });
-    if (history.length > 8) history.pop();
-    localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
-    renderHistory();
-}
-
-function renderHistory() {
-    const history = JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]');
-    const container = document.getElementById('historyList');
-    if (!container) return;
-    container.innerHTML = history.map((item, i) =>
-        '<div class="history-item" onclick="restoreFromHistory(' + i + ')">' +
-        '<div class="history-label">' + item.label + '</div>' +
-        '<div class="history-time">' + timeAgo(item.timestamp) + '</div>' +
-        '</div>'
-    ).join('');
-}
-
-window.restoreFromHistory = function(index) {
-    const history = JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]');
-    const item = history[index];
-    if (!item) return;
-    window.currentScript = item.script;
-    if (window.monacoInstance) window.monacoInstance.setValue(item.script);
-    if (window.viewerInstance) window.viewerInstance.loadSTL(item.stlUrl);
-    if (typeof parseSliders === 'function') buildSliders(parseSliders(item.script));
-}
-
-function timeAgo(ts) {
-    const mins = Math.floor((Date.now() - ts) / 60000);
-    if (mins < 1) return 'just now';
-    if (mins < 60) return mins + 'm ago';
-    return Math.floor(mins/60) + 'h ago';
-}
-
-// Render history on load
-renderHistory();
-
-// ===================== GEOMETRY CLICK-EDIT =====================
-window.onGeometryClick = function(hit) {
-    const normal = hit.face.normal.clone().transformDirection(hit.object.matrixWorld);
-    const bbox = new THREE.Box3().setFromObject(hit.object);
-    const size = new THREE.Vector3();
-    bbox.getSize(size);
-    let fields = {};
-    let title = "";
-    if (size.x < 20 && size.y < 20) {
-        title = "HOLE";
-        fields = { "diameter_mm": Math.min(size.x, size.y).toFixed(1), "x_position_mm": hit.point.x.toFixed(1), "y_position_mm": hit.point.y.toFixed(1) };
-    } else if (normal.z > 0.8) {
-        title = "TOP FACE";
-        fields = { "length_mm": size.x.toFixed(1), "width_mm": size.y.toFixed(1) };
-    } else if (Math.abs(size.x - size.y) < 0.5 && size.z >= size.x) {
-        title = "CYLINDER WALL";
-        fields = { "diameter_mm": size.x.toFixed(1), "height_mm": size.z.toFixed(1) };
-    } else {
-        title = "WALL";
-        fields = { "thickness_mm": Math.min(size.x, size.y).toFixed(1), "height_mm": size.z.toFixed(1) };
-    }
-    document.getElementById('editPanelTitle').textContent = title;
-    const fieldsDiv = document.getElementById('editFields');
-    fieldsDiv.innerHTML = Object.entries(fields).map(([k,v]) =>
-        '<div class="edit-field"><label>' + k.replace(/_/g,' ') + '</label>' +
-        '<input type="text" id="ef_' + k + '" value="' + v + '" class="edit-input"/></div>'
-    ).join('');
-    window.editContext = { title, fields, hitPoint: hit.point, normal };
-    document.getElementById('editPanel').style.display = 'block';
-}
-
-window.applyGeometryEdit = async function() {
-    const fields = window.editContext.fields;
-    const updated = {};
-    Object.keys(fields).forEach(k => {
-        const el = document.getElementById('ef_' + k);
-        updated[k] = el ? el.value : fields[k];
-    });
-    const changes = Object.entries(updated).map(([k,v]) => k.replace(/_/g,' ') + ' = ' + v).join(', ');
-    const instruction = 'Modify the ' + window.editContext.title.toLowerCase() + ': set ' + changes;
-    document.getElementById('aiInput').value = instruction;
-    closeEditPanel();
-    await triggerAI();
-}
-
-window.closeEditPanel = function() {
-    document.getElementById('editPanel').style.display = 'none';
-}
-
-window.addFeature = async function(type) {
-    const prompts = {
-        'gear': 'Add a gear feature to the top face.',
-        'flange': 'Add a flange to the base.',
-        'hole_pattern': 'Add a circular pattern of 4 clearance holes on the top face.',
-        'pocket': 'Add a central rectangular pocket to the top face.'
-    };
-    const instruction = prompts[type];
-    if (!instruction) return;
-    document.getElementById('aiInput').value = instruction;
-    await triggerAI();
-}
-
-</script>
+<!-- ═══════════════════════════════════════════════════════════════
+     TAB 1 — MANUAL 2D/3D
+     ═══════════════════════════════════════════════════════════════ -->
+<div class="tab-content" id="contentManual">
+  <!-- Context toolbar for manual mode -->
+  <div class="context-toolbar">
+    <button class="tool-btn" onclick="manualTool('extrude')"><span class="ti">↑</span> Extrude</button>
+    <button class="tool-btn" onclick="manualTool('revolve')"><span class="ti">⟳</span> Revolve</button>
+    <button class="tool-btn" onclick="manualTool('sweep')"><span class="ti">↝</span> Sweep</button>
+    <button class="tool-btn" onclick="manualTool('loft')"><span class="ti">⋈</span> Loft</button>
+    <div class="tool-sep"></div>
+    <button class="tool-btn" onclick="manualTool('shell')"><span class="ti">◻</span> Shell</button>
+    <button class="tool-btn" onclick="manualTool('fillet')"><span class="ti">⌒</span> Fillet</button>
+    <button class="tool-btn" onclick="manualTool('chamfer')"><span class="ti">/</span> Chamfer</button>
+    <button class="tool-btn" onclick="manualTool('hole')"><span class="ti">○</span> Hole</button>
+    <button class="tool-btn" onclick="manualTool('mirror')"><span class="ti">⊞</span> Mirror</button>
+  </div>
+
+  <div class="main-layout">
+    <!-- Left: Sketch tools -->
+    <div class="left-panel">
+      <div class="panel-header">Sketch Tools</div>
+
+      <div class="sketch-section">
+        <div class="sketch-section-title">Draw</div>
+        <div class="sketch-tool" onclick="manualTool('select')">
+          <span class="sketch-tool-icon">□</span> Select
+          <span class="sketch-tool-shortcut">V</span>
+        </div>
+        <div class="sketch-tool" onclick="manualTool('line')">
+          <span class="sketch-tool-icon">/</span> Line
+          <span class="sketch-tool-shortcut">L</span>
+        </div>
+        <div class="sketch-tool" onclick="manualTool('circle')">
+          <span class="sketch-tool-icon">○</span> Circle
+          <span class="sketch-tool-shortcut">C</span>
+        </div>
+        <div class="sketch-tool" onclick="manualTool('rectangle')">
+          <span class="sketch-tool-icon">□</span> Rectangle
+          <span class="sketch-tool-shortcut">R</span>
+        </div>
+        <div class="sketch-tool" onclick="manualTool('arc')">
+          <span class="sketch-tool-icon">⌒</span> Arc
+          <span class="sketch-tool-shortcut">A</span>
+        </div>
+        <div class="sketch-tool" onclick="manualTool('point')">
+          <span class="sketch-tool-icon">·</span> Point
+          <span class="sketch-tool-shortcut">P</span>
+        </div>
+        <div class="sketch-tool" onclick="manualTool('spline')">
+          <span class="sketch-tool-icon">∿</span> Spline
+          <span class="sketch-tool-shortcut">S</span>
+        </div>
+        <div class="sketch-tool" onclick="manualTool('polygon')">
+          <span class="sketch-tool-icon">⬡</span> Polygon
+          <span class="sketch-tool-shortcut">G</span>
+        </div>
+      </div>
+
+      <div class="sketch-section">
+        <div class="sketch-section-title">Modify</div>
+        <div class="sketch-tool" onclick="manualTool('offset')">
+          <span class="sketch-tool-icon">⊕</span> Offset
+        </div>
+        <div class="sketch-tool" onclick="manualTool('trim')">
+          <span class="sketch-tool-icon">⊣</span> Trim
+        </div>
+        <div class="sketch-tool" onclick="manualTool('extend')">
+          <span class="sketch-tool-icon">→</span> Extend
+        </div>
+        <div class="sketch-tool" onclick="manualTool('mirror_sketch')">
+          <span class="sketch-tool-icon">⟳</span> Mirror
+        </div>
+        <div class="sketch-tool" onclick="manualTool('pattern')">
+          <span class="sketch-tool-icon">⊞</span> Pattern
+        </div>
+      </div>
+
+      <div class="sketch-section">
+        <div class="sketch-section-title">Constraints</div>
+        <div class="sketch-tool" onclick="manualTool('parallel')">
+          <span class="sketch-tool-icon">∥</span> Parallel
+        </div>
+        <div class="sketch-tool" onclick="manualTool('perpendicular')">
+          <span class="sketch-tool-icon">⊥</span> Perpendicular
+        </div>
+        <div class="sketch-tool" onclick="manualTool('equal')">
+          <span class="sketch-tool-icon">≡</span> Equal
+        </div>
+        <div class="sketch-tool" onclick="manualTool('concentric')">
+          <span class="sketch-tool-icon">◎</span> Concentric
+        </div>
+        <div class="sketch-tool" onclick="manualTool('tangent')">
+          <span class="sketch-tool-icon">⊾</span> Tangent
+        </div>
+        <div class="sketch-tool" onclick="manualTool('dimension')">
+          <span class="sketch-tool-icon">📐</span> Dimension
+        </div>
+      </div>
+    </div>
+
+    <!-- Center: Viewport -->
+    <div class="center-area">
+      <div class="canvas-area" id="manualViewport">
+        <div class="canvas-empty-state">
+          <div class="canvas-empty-icon">✏</div>
+          <div class="canvas-empty-title">Manual Sketch Mode</div>
+          <div class="canvas-empty-sub">Select a sketch tool from the left panel to begin drawing.<br>Full 2D sketch → 3D extrude workflow coming in the next version.</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Right: empty for now -->
+    <div class="right-panel">
+      <div class="right-panel-section">
+        <div class="right-panel-section-header">SKETCH PROPERTIES</div>
+      </div>
+      <div class="props-body">
+        <div style="padding:12px;color:var(--text-dim);font-size:11px;">
+          Select a sketch element to view properties.
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     TAB 2 — PROMPT TO GEOMETRY (PRIMARY)
+     ═══════════════════════════════════════════════════════════════ -->
+<div class="tab-content active" id="contentPrompt">
+  <!-- Context toolbar -->
+  <div class="context-toolbar" id="promptToolbar">
+    <div class="tool-dropdown">
+      <button class="tool-btn" onclick="toolbarDropdownToggle(this)"><span class="ti">+</span> Add Feature ▾</button>
+      <div class="tool-dropdown-menu">
+        <div class="tool-dropdown-item" onclick="toolbarOp('hole')">○ Hole / Bore</div>
+        <div class="tool-dropdown-item" onclick="toolbarOp('pocket')">▽ Pocket</div>
+        <div class="tool-dropdown-item" onclick="toolbarOp('boss')">⬆ Boss</div>
+        <div class="tool-dropdown-item" onclick="toolbarOp('chamfer')">/ Chamfer</div>
+        <div class="tool-dropdown-item" onclick="toolbarOp('fillet')">⌒ Fillet</div>
+        <div class="tool-dropdown-item" onclick="toolbarOp('shell')">◻ Shell</div>
+      </div>
+    </div>
+    <button class="tool-btn" onclick="toolbarOp('extrude')"><span class="ti">↑</span> Extrude</button>
+    <button class="tool-btn" onclick="toolbarOp('hole')"><span class="ti">○</span> Hole</button>
+    <button class="tool-btn" onclick="toolbarOp('fillet')"><span class="ti">⌒</span> Fillet</button>
+    <button class="tool-btn" onclick="toolbarOp('chamfer')"><span class="ti">/</span> Chamfer</button>
+    <button class="tool-btn" onclick="toolbarOp('shell')"><span class="ti">◻</span> Shell</button>
+    <div class="tool-sep"></div>
+    <button class="tool-btn" onclick="undoCanvas()"><span class="ti">↩</span> Undo</button>
+    <div class="tool-sep"></div>
+    <button class="tool-btn" onclick="exportSTEP()"><span class="ti">↓</span> Export STEP</button>
+  </div>
+
+  <!-- Face ops bar (hidden until face selected) -->
+  <div class="face-ops-bar" id="faceOpsBar">
+    <span class="face-ops-label" id="faceOpsLabel">TOP FACE</span>
+    <span class="face-ops-sep">│</span>
+    <button onclick="faceOp('hole')">⊕ Add Hole</button>
+    <button onclick="faceOp('pocket')">▽ Add Pocket</button>
+    <button onclick="faceOp('boss')">⬆ Add Boss</button>
+    <button onclick="faceOp('fillet')">⌒ Fillet Edges</button>
+    <button onclick="faceOp('extrude')">↑ Extrude</button>
+    <button onclick="faceOp('edit2d')" class="face-op-primary">✏ Edit in 2D</button>
+    <button onclick="faceOp('clear')" class="face-op-clear">✕</button>
+  </div>
+
+  <div class="main-layout">
+    <!-- Left: Template Library -->
+    <div class="left-panel" id="templatePanel">
+      <div class="panel-header">Template Library</div>
+      <input type="text" class="search-box" placeholder="Search templates..." oninput="filterTemplates(this.value)">
+
+      <div style="overflow-y:auto;flex:1;">
+        <div class="template-group">
+          <div class="template-group-header" onclick="toggleGroup(this)">
+            <span class="template-group-arrow">▼</span> Structural
+          </div>
+          <div class="template-group-items">
+            <div class="template-item" onclick="onTemplateClick('bracket')">
+              <span class="template-item-icon">L</span>
+              <span class="template-item-name">L-Bracket</span>
+              <span class="template-item-add">+</span>
+            </div>
+            <div class="template-item" onclick="onTemplateClick('channel')">
+              <span class="template-item-icon">U</span>
+              <span class="template-item-name">U-Channel</span>
+              <span class="template-item-add">+</span>
+            </div>
+            <div class="template-item" onclick="onTemplateClick('i_beam')">
+              <span class="template-item-icon">I</span>
+              <span class="template-item-name">I-Beam</span>
+              <span class="template-item-add">+</span>
+            </div>
+            <div class="template-item" onclick="onTemplateClick('plate')">
+              <span class="template-item-icon">□</span>
+              <span class="template-item-name">Plate</span>
+              <span class="template-item-add">+</span>
+            </div>
+            <div class="template-item" onclick="onTemplateClick('flange')">
+              <span class="template-item-icon">⬡</span>
+              <span class="template-item-name">Flange</span>
+              <span class="template-item-add">+</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="template-group">
+          <div class="template-group-header" onclick="toggleGroup(this)">
+            <span class="template-group-arrow">▼</span> Rotational
+          </div>
+          <div class="template-group-items">
+            <div class="template-item" onclick="onTemplateClick('shaft')">
+              <span class="template-item-icon">|</span>
+              <span class="template-item-name">Shaft</span>
+              <span class="template-item-add">+</span>
+            </div>
+            <div class="template-item" onclick="onTemplateClick('gear')">
+              <span class="template-item-icon">⚙</span>
+              <span class="template-item-name">Gear</span>
+              <span class="template-item-add">+</span>
+            </div>
+            <div class="template-item" onclick="onTemplateClick('hub')">
+              <span class="template-item-icon">○</span>
+              <span class="template-item-name">Hub / Ring</span>
+              <span class="template-item-add">+</span>
+            </div>
+            <div class="template-item" onclick="onTemplateClick('disk')">
+              <span class="template-item-icon">◎</span>
+              <span class="template-item-name">Disk</span>
+              <span class="template-item-add">+</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="template-group">
+          <div class="template-group-header" onclick="toggleGroup(this)">
+            <span class="template-group-arrow">▼</span> Enclosures
+          </div>
+          <div class="template-group-items">
+            <div class="template-item" onclick="onTemplateClick('housing')">
+              <span class="template-item-icon">⊞</span>
+              <span class="template-item-name">Housing</span>
+              <span class="template-item-add">+</span>
+            </div>
+            <div class="template-item" onclick="onTemplateClick('box')">
+              <span class="template-item-icon">□</span>
+              <span class="template-item-name">Box</span>
+              <span class="template-item-add">+</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="template-group">
+          <div class="template-group-header" onclick="toggleGroup(this)">
+            <span class="template-group-arrow">▼</span> Custom
+          </div>
+          <div class="template-group-items">
+            <div class="template-item" onclick="showToast('Describe in the chat below to generate a custom shape')">
+              <span class="template-item-icon">+</span>
+              <span class="template-item-name">From prompt...</span>
+              <span class="template-item-add">AI</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Center: Canvas + Chat -->
+    <div class="center-area">
+      <div class="canvas-area" id="viewerCanvas">
+        <!-- Three.js renders here -->
+        <div class="canvas-empty-state" id="canvasEmpty">
+          <div class="canvas-empty-icon">◆</div>
+          <div class="canvas-empty-title">No Geometry</div>
+          <div class="canvas-empty-sub">Select a template from the left panel to begin,<br>or describe your part in the chat below.</div>
+        </div>
+
+        <!-- Operation panel (floating) -->
+        <div class="op-panel" id="opPanel"></div>
+
+        <!-- Generation overlay -->
+        <div class="gen-overlay" id="genOverlay">
+          <div class="gen-spinner"></div>
+          <span class="gen-text">Generating...</span>
+        </div>
+      </div>
+
+      <!-- Chat panel -->
+      <div class="chat-panel">
+        <div class="chat-history" id="chatHistory">
+          <div class="chat-msg system">
+            <span class="chat-prefix">SYS ›</span>
+            <span class="chat-text">Welcome to DesignOS. Select a template or describe your part below.</span>
+          </div>
+        </div>
+        <div class="chat-shortcuts">
+          <div class="shortcut" onclick="submitShortcut('add 4 M6 mounting holes on top face')">+ M6 holes</div>
+          <div class="shortcut" onclick="submitShortcut('add 2mm fillet to all vertical edges')">+ fillet 2mm</div>
+          <div class="shortcut" onclick="submitShortcut('add pocket 30x20mm depth 5mm on top face')">+ pocket</div>
+          <div class="shortcut" onclick="submitShortcut('add boss diameter 15mm height 5mm on top face')">+ boss</div>
+          <div class="shortcut" onclick="submitShortcut('mirror all holes about XZ plane')">mirror holes</div>
+          <div class="shortcut" onclick="submitShortcut('shell with 2mm wall thickness')">shell 2mm</div>
+        </div>
+        <div class="chat-input-row">
+          <span class="chat-ai-label">AI ›</span>
+          <input type="text" class="chat-input" id="aiInput" placeholder="Describe modifications or operations..."
+                 onkeydown="if(event.key==='Enter')submitChatInput()">
+          <button class="chat-submit" onclick="submitChatInput()">⏎</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Right: Assembly Tree + Properties -->
+    <div class="right-panel">
+      <div class="right-panel-section">
+        <div class="right-panel-section-header" onclick="this.parentElement.querySelector('.assembly-tree').classList.toggle('hidden')">
+          ASSEMBLY TREE ▾
+        </div>
+        <div class="assembly-tree" id="assemblyTree">
+          <div style="padding:12px;color:var(--text-dim);font-size:11px;">No geometry yet</div>
+        </div>
+      </div>
+
+      <div class="right-panel-section" style="flex:1;display:flex;flex-direction:column;">
+        <div class="right-panel-section-header">PROPERTIES</div>
+        <div class="props-body" id="propsBody">
+          <div style="color:var(--text-dim);font-size:11px;">
+            Select a geometry node in the tree to edit its parameters.
+          </div>
+        </div>
+      </div>
+
+      <div class="right-panel-section">
+        <div class="right-panel-section-header" onclick="this.parentElement.querySelector('.history-list').classList.toggle('hidden')">
+          HISTORY ▾
+        </div>
+        <div class="history-list" id="historyList">
+          <div style="padding:12px;color:var(--text-dim);font-size:11px;">No history yet</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     TAB 3 — SCRIPT EDITOR
+     ═══════════════════════════════════════════════════════════════ -->
+<div class="tab-content" id="contentEditor">
+  <div class="context-toolbar">
+    <button class="tool-btn" onclick="runCurrentScript()"><span class="ti">▶</span> Run (Ctrl+S)</button>
+    <div class="tool-sep"></div>
+    <span style="font-size:11px;color:var(--text-dim);padding:0 8px;">CadQuery Script Editor — edits sync with viewport</span>
+  </div>
+  <div class="editor-container">
+    <div class="editor-left">
+      <div class="panel-header">Parameters</div>
+      <div id="paramSliders">
+        <div style="padding:12px;color:var(--text-dim);font-size:11px;">No parameters detected</div>
+      </div>
+    </div>
+    <div class="editor-main" id="monacoEditor"></div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     STATUS BAR
+     ═══════════════════════════════════════════════════════════════ -->
+<div class="status-bar">
+  <span class="status-msg" id="statusMsg">Ready</span>
+  <span class="status-sep">│</span>
+  <span class="status-coords" id="coords">x: 0.0  y: 0.0  z: 0.0</span>
+  <span class="status-sep">│</span>
+  <span>mm</span>
+  <span class="status-sep">│</span>
+  <span id="statusGeneration"></span>
+  <span class="status-right">
+    <span class="status-dot off" id="statusOllama">Ollama</span>
+    <span class="status-dot off" id="statusGPU">GPU</span>
+  </span>
+</div>
+
+<!-- Modal backdrop -->
+<div class="modal-backdrop" id="modalBackdrop" onclick="if(event.target===this)closeModal()">
+  <div class="modal" id="modalContent"></div>
+</div>
+
+<!-- Toast container -->
+<div class="toast-container" id="toastContainer"></div>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     SCRIPTS
+     ═══════════════════════════════════════════════════════════════ -->
 <script src="/static/canvas.js"></script>
-<script src="/static/sliders.js"></script>
 <script src="/static/editor.js"></script>
+
+<script type="module">
+  import { CADViewer } from '/static/viewer.js';
+
+  // Initialize viewer in the prompt tab viewport
+  const viewer = new CADViewer('viewerCanvas');
+  window.viewerInstance = viewer;
+
+  // Connect face selection
+  setupFaceSelection(viewer);
+
+  // Close dropdowns on outside click
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('.tool-dropdown')) {
+      document.querySelectorAll('.tool-dropdown.open').forEach(d => d.classList.remove('open'));
+    }
+  });
+</script>
+
+<script>
+  // ─── Tab switching ───
+  function switchTab(tabName) {
+    // Deactivate all
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+
+    if (tabName === 'manual') {
+      document.getElementById('tabManual').classList.add('active');
+      document.getElementById('contentManual').classList.add('active');
+    } else if (tabName === 'prompt') {
+      document.getElementById('tabPrompt').classList.add('active');
+      document.getElementById('contentPrompt').classList.add('active');
+    } else if (tabName === 'editor') {
+      document.getElementById('tabEditor').classList.add('active');
+      document.getElementById('contentEditor').classList.add('active');
+      initEditorTab();
+    }
+  }
+
+  // ─── Manual tool handler (Tab 1) ───
+  function manualTool(tool) {
+    showToast(`${tool.charAt(0).toUpperCase() + tool.slice(1)} — Feature coming in next version`);
+    // Highlight selected tool
+    document.querySelectorAll('.sketch-tool').forEach(t => t.classList.remove('active'));
+    event.currentTarget.classList.add('active');
+  }
+
+  // ─── Toast helper (accessible globally) ───
+  window.showToast = function(msg) {
+    const container = document.getElementById('toastContainer');
+    if (!container) return;
+    const toast = document.createElement('div');
+    toast.className = 'toast';
+    toast.textContent = msg;
+    container.appendChild(toast);
+    setTimeout(() => toast.remove(), 3000);
+  };
+</script>
+
 </body>
 </html>
