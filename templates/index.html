@@ -436,6 +436,64 @@
   </span>
 </div>
 
+<!-- 2D Sketch Editor Overlay -->
+<div class="sketch2d-overlay" id="sketch2dOverlay">
+  <div class="sketch2d-container">
+    <div class="sketch2d-header">
+      <div class="sketch2d-title">
+        <span class="sketch2d-icon">✏</span>
+        <span id="sketch2dTitleText">2D Face Sketcher</span>
+      </div>
+      <div class="sketch2d-toolbar">
+        <button class="sketch2d-tool-btn active" id="s2dTool_select" onclick="selectSketch2dTool('select')">
+          <span class="ti">□</span> Select
+        </button>
+        <div class="sketch2d-separator"></div>
+        <button class="sketch2d-tool-btn" id="s2dTool_circle" onclick="selectSketch2dTool('circle')">
+          <span class="ti">○</span> Circle (Hole)
+        </button>
+        <button class="sketch2d-tool-btn" id="s2dTool_rect_pocket" onclick="selectSketch2dTool('rect_pocket')">
+          <span class="ti">▽</span> Rect (Pocket)
+        </button>
+        <button class="sketch2d-tool-btn" id="s2dTool_rect_boss" onclick="selectSketch2dTool('rect_boss')">
+          <span class="ti">⬆</span> Circle (Boss)
+        </button>
+        <div class="sketch2d-separator"></div>
+        <button class="sketch2d-tool-btn" onclick="clearSketch2d()">
+          <span class="ti">✕</span> Clear
+        </button>
+      </div>
+      <div class="sketch2d-actions">
+        <button class="btn-app" onclick="closeSketch2d()">Cancel</button>
+        <button class="btn-app-primary" onclick="applySketch2d()">Finish Sketch</button>
+      </div>
+    </div>
+    
+    <div class="sketch2d-body">
+      <!-- Left: elements list / properties -->
+      <div class="sketch2d-sidebar">
+        <div class="sketch2d-sidebar-header">SKETCH ELEMENTS</div>
+        <div class="sketch2d-elements-list" id="sketch2dElementsList">
+          <div style="padding: 12px; color: var(--text-dim); font-size: 11px;">No sketch elements</div>
+        </div>
+        
+        <div class="sketch2d-sidebar-header" style="margin-top: 16px;">ELEMENT PARAMETERS</div>
+        <div class="sketch2d-elem-params" id="sketch2dElemParams">
+          <div style="padding: 12px; color: var(--text-dim); font-size: 11px;">
+            Select an element to view/edit dimensions.
+          </div>
+        </div>
+      </div>
+      
+      <!-- Center: 2D Canvas workspace -->
+      <div class="sketch2d-workspace" id="sketch2dWorkspace">
+        <canvas id="sketch2dCanvas"></canvas>
+        <div class="sketch2d-coords-display" id="sketch2dCoords">X: 0.0 Y: 0.0 mm</div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- Modal backdrop -->
 <div class="modal-backdrop" id="modalBackdrop" onclick="if(event.target===this)closeModal()">
   <div class="modal" id="modalContent"></div>

@@ -281,9 +281,11 @@ def add_chamfers(result, size, edge_selector="|Z"):
     except Exception:
         return result
 
-def add_pocket(result, pocket_w, pocket_l, depth):
+def add_pocket(result, pocket_w, pocket_l, depth, x=0, y=0):
     wp = get_working_plane(result)
-    return wp.rect(pocket_w, pocket_l).cutBlind(-depth)
+    if float(x) != 0 or float(y) != 0:
+        return wp.center(float(x), float(y)).rect(float(pocket_w), float(pocket_l)).cutBlind(-float(depth))
+    return wp.rect(float(pocket_w), float(pocket_l)).cutBlind(-float(depth))
 
 def add_shell(result, wall_t):
     try:

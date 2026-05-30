@@ -543,7 +543,9 @@ window.faceOp = function(opType) {
     return;
   }
   if (opType === 'edit2d') {
-    showToast('2D Face Editor — coming in next version');
+    if (!canvas.sessionId || !canvas.selectedFace) { showToast('Select a face first'); return; }
+    document.getElementById('faceOpsBar').classList.remove('visible');
+    openSketch2d();
     return;
   }
   if (!canvas.sessionId) { showToast('Generate a part first'); return; }
@@ -868,4 +870,400 @@ async function checkHealth() {
     document.getElementById('statusOllama').className = `status-dot ${data.ollama ? 'on' : 'off'}`;
     document.getElementById('statusGPU').className = `status-dot ${data.gpu ? 'on' : 'off'}`;
   } catch {}
+}
+
+// ═══════════════════════════════════════════════════════════════
+// 2D Face Sketcher
+// ═══════════════════════════════════════════════════════════════
+
+let s2dState = {
+  elements: [],
+  currentTool: 'select',
+  selectedId: null,
+  faceWidth: 100,
+  faceHeight: 100,
+  pxPerMm: 1,
+  centerX: 0,
+  centerY: 0,
+  mouseX: 0,
+  mouseY: 0,
+  snappedX: 0,
+  snappedY: 0,
+  gridSize: 1, // mm
+  isDragging: false,
+  dragOffsetX: 0,
+  dragOffsetY: 0
+};
+
+window.openSketch2d = function() {
+  const overlay = document.getElementById('sketch2dOverlay');
+  if (!overlay) return;
+  
+  // Set face title
+  const faceStr = canvas.selectedFace ? canvas.selectedFace.selector : '>Z';
+  document.getElementById('sketch2dTitleText').textContent = `2D Face Sketcher - Face ${faceStr}`;
+  
+  // Determine dimensions
+  const rootBlock = canvas.blocks.find(b => b.id === (canvas.selectedBlockId || '001')) || canvas.blocks[0];
+  s2dState.faceWidth = 100;
+  s2dState.faceHeight = 100;
+  if (rootBlock && rootBlock.params) {
+    const p = rootBlock.params;
+    if (faceStr.includes('Z')) {
+      s2dState.faceWidth = parseFloat(p.length || p.diameter || 100);
+      s2dState.faceHeight = parseFloat(p.width || p.diameter || 60);
+    } else if (faceStr.includes('Y')) {
+      s2dState.faceWidth = parseFloat(p.length || p.diameter || 100);
+      s2dState.faceHeight = parseFloat(p.height || p.diameter || 20);
+    } else if (faceStr.includes('X')) {
+      s2dState.faceWidth = parseFloat(p.width || p.diameter || 60);
+      s2dState.faceHeight = parseFloat(p.height || p.diameter || 20);
+    }
+  }
+  
+  s2dState.elements = [];
+  s2dState.selectedId = null;
+  selectSketch2dTool('select');
+  
+  overlay.classList.add('visible');
+  initSketch2dCanvas();
+  renderSketch2dSidebar();
+};
+
+window.closeSketch2d = function() {
+  document.getElementById('sketch2dOverlay').classList.remove('visible');
+};
+
+window.selectSketch2dTool = function(tool) {
+  s2dState.currentTool = tool;
+  document.querySelectorAll('.sketch2d-tool-btn').forEach(b => b.classList.remove('active'));
+  const btn = document.getElementById(`s2dTool_${tool}`);
+  if (btn) btn.classList.add('active');
+  drawSketch2d();
+};
+
+window.clearSketch2d = function() {
+  s2dState.elements = [];
+  s2dState.selectedId = null;
+  renderSketch2dSidebar();
+  drawSketch2d();
+};
+
+function initSketch2dCanvas() {
+  const ws = document.getElementById('sketch2dWorkspace');
+  const cvs = document.getElementById('sketch2dCanvas');
+  cvs.width = ws.clientWidth;
+  cvs.height = ws.clientHeight;
+  
+  const padding = 60;
+  const availW = cvs.width - padding * 2;
+  const availH = cvs.height - padding * 2;
+  
+  s2dState.pxPerMm = Math.min(availW / s2dState.faceWidth, availH / s2dState.faceHeight);
+  s2dState.centerX = cvs.width / 2;
+  s2dState.centerY = cvs.height / 2;
+  
+  cvs.onmousemove = onSketch2dMouseMove;
+  cvs.onmousedown = onSketch2dMouseDown;
+  cvs.onmouseup = onSketch2dMouseUp;
+  cvs.onmouseleave = onSketch2dMouseUp;
+  
+  drawSketch2d();
+}
+
+function getGridSnapped(val) {
+  return Math.round(val / s2dState.gridSize) * s2dState.gridSize;
+}
+
+function onSketch2dMouseMove(e) {
+  const cvs = document.getElementById('sketch2dCanvas');
+  const rect = cvs.getBoundingClientRect();
+  s2dState.mouseX = e.clientX - rect.left;
+  s2dState.mouseY = e.clientY - rect.top;
+  
+  const mmX = (s2dState.mouseX - s2dState.centerX) / s2dState.pxPerMm;
+  const mmY = (s2dState.centerY - s2dState.mouseY) / s2dState.pxPerMm;
+  
+  s2dState.snappedX = getGridSnapped(mmX);
+  s2dState.snappedY = getGridSnapped(mmY);
+  
+  document.getElementById('sketch2dCoords').textContent = `X: ${s2dState.snappedX.toFixed(1)} Y: ${s2dState.snappedY.toFixed(1)} mm`;
+  
+  if (s2dState.isDragging && s2dState.selectedId) {
+    const el = s2dState.elements.find(x => x.id === s2dState.selectedId);
+    if (el) {
+      el.x = s2dState.snappedX - s2dState.dragOffsetX;
+      el.y = s2dState.snappedY - s2dState.dragOffsetY;
+      renderSketch2dSidebar();
+    }
+  }
+  
+  drawSketch2d();
+}
+
+function onSketch2dMouseDown(e) {
+  if (s2dState.currentTool === 'select') {
+    // hit test
+    s2dState.selectedId = null;
+    for (let i = s2dState.elements.length - 1; i >= 0; i--) {
+      const el = s2dState.elements[i];
+      if (el.type === 'circle') {
+        const dx = s2dState.snappedX - el.x;
+        const dy = s2dState.snappedY - el.y;
+        if (Math.sqrt(dx*dx + dy*dy) <= el.dia/2 + 1) {
+          s2dState.selectedId = el.id;
+          break;
+        }
+      } else if (el.type === 'rect') {
+        if (Math.abs(s2dState.snappedX - el.x) <= el.w/2 + 1 && Math.abs(s2dState.snappedY - el.y) <= el.h/2 + 1) {
+          s2dState.selectedId = el.id;
+          break;
+        }
+      }
+    }
+    if (s2dState.selectedId) {
+      s2dState.isDragging = true;
+      const el = s2dState.elements.find(x => x.id === s2dState.selectedId);
+      s2dState.dragOffsetX = s2dState.snappedX - el.x;
+      s2dState.dragOffsetY = s2dState.snappedY - el.y;
+    }
+    renderSketch2dSidebar();
+  } else {
+    // create shape
+    const id = Date.now().toString();
+    if (s2dState.currentTool === 'circle') {
+      s2dState.elements.push({ id, type: 'circle', opType: 'hole', x: s2dState.snappedX, y: s2dState.snappedY, dia: 6.6 });
+    } else if (s2dState.currentTool === 'rect_pocket') {
+      s2dState.elements.push({ id, type: 'rect', opType: 'pocket', x: s2dState.snappedX, y: s2dState.snappedY, w: 20, h: 15, depth: 5 });
+    } else if (s2dState.currentTool === 'rect_boss') {
+      s2dState.elements.push({ id, type: 'circle', opType: 'boss', x: s2dState.snappedX, y: s2dState.snappedY, dia: 15, depth: 5 });
+    }
+    s2dState.selectedId = id;
+    s2dState.currentTool = 'select'; // switch back to select
+    document.querySelectorAll('.sketch2d-tool-btn').forEach(b => b.classList.remove('active'));
+    document.getElementById('s2dTool_select').classList.add('active');
+    renderSketch2dSidebar();
+  }
+  drawSketch2d();
+}
+
+function onSketch2dMouseUp() {
+  s2dState.isDragging = false;
+}
+
+function drawSketch2d() {
+  const cvs = document.getElementById('sketch2dCanvas');
+  const ctx = cvs.getContext('2d');
+  ctx.clearRect(0, 0, cvs.width, cvs.height);
+  
+  // Grid
+  ctx.strokeStyle = '#222';
+  ctx.lineWidth = 1;
+  const gridPx = 10 * s2dState.pxPerMm; // 10mm grid
+  const originX = s2dState.centerX;
+  const originY = s2dState.centerY;
+  
+  ctx.beginPath();
+  for (let x = originX % gridPx; x < cvs.width; x += gridPx) { ctx.moveTo(x, 0); ctx.lineTo(x, cvs.height); }
+  for (let y = originY % gridPx; y < cvs.height; y += gridPx) { ctx.moveTo(0, y); ctx.lineTo(cvs.width, y); }
+  ctx.stroke();
+  
+  // Axes
+  ctx.strokeStyle = '#444';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(originX, 0); ctx.lineTo(originX, cvs.height);
+  ctx.moveTo(0, originY); ctx.lineTo(cvs.width, originY);
+  ctx.stroke();
+  
+  // Face outline
+  ctx.strokeStyle = '#0078d4';
+  ctx.lineWidth = 2;
+  ctx.setLineDash([5, 5]);
+  const facePxW = s2dState.faceWidth * s2dState.pxPerMm;
+  const facePxH = s2dState.faceHeight * s2dState.pxPerMm;
+  ctx.strokeRect(originX - facePxW/2, originY - facePxH/2, facePxW, facePxH);
+  ctx.setLineDash([]);
+  
+  // Elements
+  s2dState.elements.forEach(el => {
+    const cx = originX + el.x * s2dState.pxPerMm;
+    const cy = originY - el.y * s2dState.pxPerMm;
+    const isSel = el.id === s2dState.selectedId;
+    
+    ctx.strokeStyle = isSel ? '#fff' : '#0078d4';
+    ctx.fillStyle = isSel ? 'rgba(255,255,255,0.2)' : 'rgba(0,120,212,0.2)';
+    ctx.lineWidth = 2;
+    
+    ctx.beginPath();
+    if (el.type === 'circle') {
+      const r = (el.dia / 2) * s2dState.pxPerMm;
+      ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    } else if (el.type === 'rect') {
+      const rw = el.w * s2dState.pxPerMm;
+      const rh = el.h * s2dState.pxPerMm;
+      ctx.rect(cx - rw/2, cy - rh/2, rw, rh);
+    }
+    ctx.fill();
+    ctx.stroke();
+    
+    // center point
+    ctx.fillStyle = ctx.strokeStyle;
+    ctx.beginPath(); ctx.arc(cx, cy, 3, 0, Math.PI*2); ctx.fill();
+  });
+  
+  // Preview
+  if (s2dState.currentTool !== 'select') {
+    const cx = originX + s2dState.snappedX * s2dState.pxPerMm;
+    const cy = originY - s2dState.snappedY * s2dState.pxPerMm;
+    ctx.strokeStyle = '#ff8c00';
+    ctx.fillStyle = 'rgba(255,140,0,0.3)';
+    ctx.beginPath();
+    if (s2dState.currentTool === 'circle' || s2dState.currentTool === 'rect_boss') {
+      const r = ((s2dState.currentTool === 'circle' ? 6.6 : 15) / 2) * s2dState.pxPerMm;
+      ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    } else if (s2dState.currentTool === 'rect_pocket') {
+      const rw = 20 * s2dState.pxPerMm;
+      const rh = 15 * s2dState.pxPerMm;
+      ctx.rect(cx - rw/2, cy - rh/2, rw, rh);
+    }
+    ctx.fill(); ctx.stroke();
+  }
+}
+
+function renderSketch2dSidebar() {
+  const list = document.getElementById('sketch2dElementsList');
+  const params = document.getElementById('sketch2dElemParams');
+  
+  if (s2dState.elements.length === 0) {
+    list.innerHTML = `<div style="padding:12px;color:var(--text-dim);font-size:11px;">No sketch elements</div>`;
+  } else {
+    list.innerHTML = s2dState.elements.map(el => `
+      <div class="sketch2d-el-item ${el.id === s2dState.selectedId ? 'selected' : ''}" onclick="s2dState.selectedId='${el.id}'; renderSketch2dSidebar(); drawSketch2d();">
+        <span>${el.opType.toUpperCase()} (x:${el.x.toFixed(1)}, y:${el.y.toFixed(1)})</span>
+        <span class="sketch2d-el-del" onclick="event.stopPropagation(); deleteSketch2dElem('${el.id}')">✕</span>
+      </div>
+    `).join('');
+  }
+  
+  const sel = s2dState.elements.find(x => x.id === s2dState.selectedId);
+  if (!sel) {
+    params.innerHTML = `<div style="padding:12px;color:var(--text-dim);font-size:11px;">Select an element to view/edit dimensions.</div>`;
+    return;
+  }
+  
+  let html = `
+    <label>X Offset <input type="number" step="0.5" value="${sel.x}" onchange="updateSketch2dElem('x', this.value)"></label>
+    <label>Y Offset <input type="number" step="0.5" value="${sel.y}" onchange="updateSketch2dElem('y', this.value)"></label>
+  `;
+  if (sel.type === 'circle') {
+    html += `<label>Diameter <input type="number" step="0.5" value="${sel.dia}" onchange="updateSketch2dElem('dia', this.value)"></label>`;
+    if (sel.opType === 'boss') {
+      html += `<label>Height <input type="number" step="0.5" value="${sel.depth}" onchange="updateSketch2dElem('depth', this.value)"></label>`;
+    }
+  } else if (sel.type === 'rect') {
+    html += `
+      <label>Width (X) <input type="number" step="0.5" value="${sel.w}" onchange="updateSketch2dElem('w', this.value)"></label>
+      <label>Length (Y) <input type="number" step="0.5" value="${sel.h}" onchange="updateSketch2dElem('h', this.value)"></label>
+      <label>Depth <input type="number" step="0.5" value="${sel.depth}" onchange="updateSketch2dElem('depth', this.value)"></label>
+    `;
+  }
+  params.innerHTML = html;
+}
+
+window.deleteSketch2dElem = function(id) {
+  s2dState.elements = s2dState.elements.filter(x => x.id !== id);
+  if (s2dState.selectedId === id) s2dState.selectedId = null;
+  renderSketch2dSidebar();
+  drawSketch2d();
+};
+
+window.updateSketch2dElem = function(key, val) {
+  const el = s2dState.elements.find(x => x.id === s2dState.selectedId);
+  if (el) {
+    el[key] = parseFloat(val) || 0;
+    renderSketch2dSidebar();
+    drawSketch2d();
+  }
+};
+
+window.applySketch2d = async function() {
+  if (s2dState.elements.length === 0) { closeSketch2d(); return; }
+  const faceSelector = canvas.selectedFace ? canvas.selectedFace.selector : '>Z';
+  const parentId = canvas.selectedBlockId || '001';
+  
+  closeSketch2d();
+  document.getElementById('faceOpsBar').classList.remove('visible');
+  showGenOverlay(`Applying ${s2dState.elements.length} sketch features...`);
+  
+  try {
+    for (const elem of s2dState.elements) {
+      let blockType = '';
+      let params = {};
+      
+      if (elem.opType === 'hole') {
+        blockType = 'holes';
+        params = { hole_points: `[[${elem.x},${elem.y}]]`, hole_dia: elem.dia };
+      } else if (elem.opType === 'pocket') {
+        blockType = 'pockets';
+        params = { width: elem.w, length: elem.h, depth: elem.depth, x: elem.x, y: elem.y };
+      } else if (elem.opType === 'boss') {
+        blockType = 'boss';
+        params = { diameter: elem.dia, height: elem.depth, x: elem.x, y: elem.y };
+      }
+      
+      addChatMsg('op', `Applying ${blockType} at x:${elem.x}, y:${elem.y}`);
+      
+      const res = await fetch('/canvas/add-block', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          session_id: canvas.sessionId,
+          block_type: blockType,
+          params, parent_id: parentId, face: faceSelector
+        })
+      });
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      
+      if (data.job_id) {
+        canvas.currentJobId = data.job_id;
+        await executeJobPromise(data.job_id);
+      }
+    }
+    await loadBlocks();
+  } catch (err) {
+    addChatMsg('error', 'Sketch apply failed: ' + err.message);
+  } finally {
+    hideGenOverlay();
+  }
+};
+
+function executeJobPromise(jobId) {
+  return new Promise((resolve, reject) => {
+    const es = new EventSource(`/stream/${jobId}`);
+    es.onmessage = function(event) {
+      try {
+        const entry = JSON.parse(event.data);
+        if (entry.message) updateStatus(entry.message);
+        if (entry.complete || entry.status === 'completed') {
+          es.close();
+          updateStatus('Ready');
+          if (window.viewerInstance && entry.has_stl_file !== false) {
+            window.viewerInstance.loadSTL(`/model/${jobId}`);
+          }
+          saveToHistory();
+          resolve(jobId);
+        }
+        if (entry.status === 'failed' || (entry.error && !entry.complete)) {
+          es.close();
+          reject(new Error(entry.error || 'Generation failed'));
+        }
+      } catch (e) {}
+    };
+    es.onerror = function() {
+      es.close();
+      reject(new Error('SSE stream disconnected'));
+    };
+  });
 }

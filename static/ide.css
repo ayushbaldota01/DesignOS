@@ -915,5 +915,191 @@ html, body {
   cursor: pointer;
 }
 
+/* ═══════════════════════════════════════════════════════════════
+   2D SKETCH EDITOR OVERLAY
+   ═══════════════════════════════════════════════════════════════ */
+.sketch2d-overlay {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0, 0, 0, 0.75);
+  z-index: 600;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+.sketch2d-overlay.visible {
+  display: flex;
+}
+.sketch2d-container {
+  background: var(--bg-panel);
+  border: 1px solid var(--border-light);
+  width: 95vw;
+  height: 90vh;
+  max-width: 1200px;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 12px 48px rgba(0,0,0,0.6);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.sketch2d-header {
+  height: 48px;
+  background: var(--bg-toolbar);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+}
+.sketch2d-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  color: var(--text-primary);
+  font-size: 13px;
+}
+.sketch2d-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.sketch2d-tool-btn {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-primary);
+  padding: 4px 10px;
+  font-size: 11px;
+  border-radius: 2px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.sketch2d-tool-btn:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-light);
+}
+.sketch2d-tool-btn.active {
+  background: var(--bg-selected);
+  color: #fff;
+  border-color: var(--accent);
+}
+.sketch2d-separator {
+  width: 1px;
+  height: 20px;
+  background: var(--border);
+  margin: 0 4px;
+}
+.sketch2d-actions {
+  display: flex;
+  gap: 8px;
+}
+.sketch2d-body {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+}
+.sketch2d-sidebar {
+  width: 260px;
+  background: var(--bg-secondary);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+}
+.sketch2d-sidebar-header {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-dim);
+  padding: 12px 16px 6px 16px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border-bottom: 1px solid rgba(255,255,255,0.02);
+}
+.sketch2d-elements-list {
+  flex: 1;
+  overflow-y: auto;
+}
+.sketch2d-el-item {
+  padding: 8px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--text-primary);
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+}
+.sketch2d-el-item:hover {
+  background: var(--bg-hover);
+}
+.sketch2d-el-item.selected {
+  background: rgba(0, 120, 212, 0.15);
+  border-left: 2px solid var(--accent);
+}
+.sketch2d-el-del {
+  color: var(--text-dim);
+  cursor: pointer;
+  padding: 2px 6px;
+  font-size: 12px;
+}
+.sketch2d-el-del:hover {
+  color: var(--error);
+}
+.sketch2d-elem-params {
+  padding: 12px 16px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-panel);
+}
+.sketch2d-elem-params label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+.sketch2d-elem-params input {
+  width: 80px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  padding: 4px 6px;
+  font-family: var(--mono-code);
+  font-size: 11px;
+  text-align: right;
+}
+.sketch2d-elem-params input:focus {
+  border-color: var(--accent);
+}
+.sketch2d-workspace {
+  flex: 1;
+  background: #111;
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.sketch2d-workspace canvas {
+  background: #151515;
+  box-shadow: 0 0 20px rgba(0,0,0,0.5);
+  cursor: crosshair;
+}
+.sketch2d-coords-display {
+  position: absolute;
+  bottom: 12px;
+  right: 12px;
+  background: rgba(0, 0, 0, 0.6);
+  border: 1px solid var(--border-light);
+  padding: 4px 10px;
+  font-size: 10px;
+  font-family: var(--mono-code);
+  color: var(--text-secondary);
+  pointer-events: none;
+}
+
 /* Hide/show helpers */
 .hidden { display: none !important; }

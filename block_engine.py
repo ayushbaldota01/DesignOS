@@ -53,7 +53,7 @@ def _parse_params(block_type, params_raw):
         "holes":    ["hole_points", "hole_dia"],
         "fillets":  ["radius"],
         "chamfers": ["size"],
-        "pockets":  ["width", "length", "depth"],
+        "pockets":  ["width", "length", "depth", "x", "y"],
         "boss":     ["diameter", "height", "x", "y"],
         "shell":    ["wall_t"],
         "smart_fillet": ["radius"],
@@ -202,6 +202,7 @@ def add_block_to_script(script: str, block_type: str, params: dict,
 
     if block_type in FEATURE_TYPES:
         args = ", ".join(str(v) for v in params.values())
+        params_raw = ",".join(str(v) for v in params.values())
         code_line = f"{parent_var} = FEATURE_MAP['{block_type}']({parent_var}, {args})"
     else:
         # Extract x,y,z if present (or default to 0)
