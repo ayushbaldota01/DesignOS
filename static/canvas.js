@@ -543,9 +543,17 @@ window.faceOp = function(opType) {
     return;
   }
   if (opType === 'edit2d') {
-    if (!canvas.sessionId || !canvas.selectedFace) { showToast('Select a face first'); return; }
-    document.getElementById('faceOpsBar').classList.remove('visible');
-    openSketch2d();
+    // Switch to Manual tab with face context loaded
+    switchTab('manual');
+    
+    // Set 2D sketch mode for selected face
+    const faceSelector = window.clickedFaceSelector || '>Z';
+    const blockId = canvas.selectedBlockId;
+    
+    // Show 2D canvas with face outline
+    initSketchForFace(faceSelector, blockId);
+    
+    showToast(`Editing ${window.clickedFaceLabel || 'face'} in 2D sketch mode`);
     return;
   }
   if (!canvas.sessionId) { showToast('Generate a part first'); return; }

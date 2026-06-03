@@ -389,3 +389,97 @@ FEATURE_MAP = {
     "smart_fillet": apply_smart_fillet,
     "flange_holes": add_flange_holes,
 }
+
+TEMPLATES = {
+    'motor_mount': {
+        'name': 'NEMA 17 Motor Mount',
+        'script': """import cadquery as cq
+
+# NEMA 17 Motor Mount Bracket
+width = 42 #mm
+height = 42 #mm
+thickness = 3 #mm
+bracket_length = 40 #mm
+hole_dist = 31.0 #mm
+center_hole = 22.0 #mm
+
+# Create L-bracket
+base = (
+    cq.Workplane("XY")
+    .box(width, bracket_length, thickness)
+    .faces(">Z").workplane()
+    .pushPoints([(0, -bracket_length/2 + thickness/2)])
+    .rect(width, thickness)
+    .extrude(height)
+)
+
+# Add motor face features
+mount = (
+    base.faces(">Y").workplane(centerOption="CenterOfMass")
+    .center(0, height/2)
+    .circle(center_hole/2).cutThruAll()
+    .rect(hole_dist, hole_dist, forConstruction=True)
+    .vertices()
+    .hole(3.2)
+)
+
+# Add base mounting slots
+final = (
+    mount.faces("<Z").workplane()
+    .pushPoints([(0, bracket_length/4)])
+    .slot2D(15, 4.5)
+    .cutThruAll()
+    .edges("|Y").fillet(2)
+)
+""",
+        'type': 'structural'
+    },
+    'raspberry_pi': {
+        'name': 'Raspberry Pi Case Base',
+        'script': """import cadquery as cq
+
+# Raspberry Pi 4 Base Model
+length = 88.0 #mm
+width = 58.0 #mm
+height = 20.0 #mm
+wall = 2.0 #mm
+standoff_height = 4.0 #mm
+
+# Main shell
+box = (
+    cq.Workplane("XY")
+    .box(length, width, height)
+    .faces(">Z")
+    .shell(-wall)
+)
+
+# Mounting standoffs (Pi 4 hole pattern)
+hole_pts = [
+    (length/2 - 3.5, width/2 - 3.5),
+    (-length/2 + 3.5, width/2 - 3.5),
+    (length/2 - 3.5, -width/2 + 3.5 + 49),
+    (-length/2 + 3.5, -width/2 + 3.5 + 49)
+]
+
+base = (
+    box.faces("<Z").workplane()
+    .pushPoints(hole_pts)
+    .circle(3.0)
+    .extrude(standoff_height)
+    .faces(">Z").workplane()
+    .pushPoints(hole_pts)
+    .hole(2.5, standoff_height)
+)
+
+# USB / Ethernet cutouts
+final = (
+    base.faces(">X").workplane(centerOption="CenterOfMass")
+    .center(0, -height/2 + 7)
+    .pushPoints([(width/2 - 10, 0), (width/2 - 28, 0)])
+    .rect(15, 14).cutThruAll()
+)
+""",
+        'type': 'enclosures'
+    }
+}
+

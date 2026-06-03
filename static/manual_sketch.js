@@ -1,296 +1,306 @@
-/**
- * DesignOS - Manual 2D Sketching and Extrusion
- */
+// DesignOS 2D Sketch Engine
+// HTML5 Canvas-based 2D sketch editor for face editing
 
-let manualState = {
-  elements: [],
-  currentTool: 'select',
-  isDrawing: false,
-  points: [],
-  ctx: null,
-  canvas: null,
-  width: 0,
-  height: 0,
-  pxPerMm: 5,
-  centerX: 0,
-  centerY: 0,
-  mouseX: 0,
-  mouseY: 0,
-  snappedX: 0,
-  snappedY: 0,
-  gridSize: 5
+const sketch = {
+    canvas: null,
+    ctx: null,
+    tool: 'select',
+    elements: [],
+    drawing: false,
+    startX: 0, startY: 0,
+    scale: 2, // px per mm
+    offsetX: 0, offsetY: 0,
+    snapGrid: 5, // mm
+    faceContext: null,
+    blockId: null
 };
 
-window.initManualSketcher = function() {
-  const viewport = document.getElementById('manualViewport');
-  viewport.innerHTML = `
-    <canvas id="manualCanvas" style="width: 100%; height: 100%; cursor: crosshair;"></canvas>
-    <div id="manualCoords" style="position: absolute; bottom: 10px; right: 10px; color: var(--text-dim); font-size: 11px;"></div>
-  `;
-  
-  const cvs = document.getElementById('manualCanvas');
-  manualState.canvas = cvs;
-  manualState.ctx = cvs.getContext('2d');
-  
-  // Handle resize
-  const resizeObserver = new ResizeObserver(entries => {
-    for (let entry of entries) {
-      cvs.width = entry.contentRect.width;
-      cvs.height = entry.contentRect.height;
-      manualState.width = cvs.width;
-      manualState.height = cvs.height;
-      manualState.centerX = cvs.width / 2;
-      manualState.centerY = cvs.height / 2;
-      drawManualSketch();
-    }
-  });
-  resizeObserver.observe(viewport);
-
-  cvs.onmousemove = onManualMouseMove;
-  cvs.onmousedown = onManualMouseDown;
-  cvs.onmouseup = onManualMouseUp;
-};
-
-function getSnapped(val) {
-  return Math.round(val / manualState.gridSize) * manualState.gridSize;
+function initSketch() {
+    sketch.canvas = document.getElementById('sketchCanvas');
+    if (!sketch.canvas) return;
+    sketch.ctx = sketch.canvas.getContext('2d');
+    
+    resizeSketchCanvas();
+    drawGrid();
+    
+    sketch.canvas.addEventListener('mousedown', onSketchMouseDown);
+    sketch.canvas.addEventListener('mousemove', onSketchMouseMove);
+    sketch.canvas.addEventListener('mouseup', onSketchMouseUp);
+    sketch.canvas.addEventListener('wheel', onSketchWheel);
+    window.addEventListener('resize', resizeSketchCanvas);
 }
 
-function onManualMouseMove(e) {
-  const rect = manualState.canvas.getBoundingClientRect();
-  manualState.mouseX = e.clientX - rect.left;
-  manualState.mouseY = e.clientY - rect.top;
-  
-  const mmX = (manualState.mouseX - manualState.centerX) / manualState.pxPerMm;
-  const mmY = (manualState.centerY - manualState.mouseY) / manualState.pxPerMm;
-  
-  manualState.snappedX = getSnapped(mmX);
-  manualState.snappedY = getSnapped(mmY);
-  
-  document.getElementById('manualCoords').textContent = `X: ${manualState.snappedX} Y: ${manualState.snappedY} mm`;
-  
-  drawManualSketch();
-}
-
-function onManualMouseDown(e) {
-  if (manualState.currentTool === 'line') {
-    if (!manualState.isDrawing) {
-      manualState.isDrawing = true;
-      manualState.points = [{x: manualState.snappedX, y: manualState.snappedY}];
-    } else {
-      manualState.points.push({x: manualState.snappedX, y: manualState.snappedY});
-      // Auto close if clicking near start
-      const start = manualState.points[0];
-      const dx = manualState.snappedX - start.x;
-      const dy = manualState.snappedY - start.y;
-      if (manualState.points.length > 2 && Math.sqrt(dx*dx + dy*dy) < manualState.gridSize) {
-        manualState.isDrawing = false;
-        manualState.elements.push({ type: 'polyline', points: [...manualState.points] });
-        manualState.points = [];
-      }
-    }
-  } else if (manualState.currentTool === 'circle') {
-    if (!manualState.isDrawing) {
-      manualState.isDrawing = true;
-      manualState.points = [{x: manualState.snappedX, y: manualState.snappedY}];
-    } else {
-      const center = manualState.points[0];
-      const dx = manualState.snappedX - center.x;
-      const dy = manualState.snappedY - center.y;
-      const r = Math.sqrt(dx*dx + dy*dy);
-      manualState.elements.push({ type: 'circle', x: center.x, y: center.y, r: r });
-      manualState.isDrawing = false;
-      manualState.points = [];
-    }
-  } else if (manualState.currentTool === 'rectangle') {
-    if (!manualState.isDrawing) {
-      manualState.isDrawing = true;
-      manualState.points = [{x: manualState.snappedX, y: manualState.snappedY}];
-    } else {
-      const start = manualState.points[0];
-      const w = Math.abs(manualState.snappedX - start.x);
-      const h = Math.abs(manualState.snappedY - start.y);
-      const cx = (manualState.snappedX + start.x) / 2;
-      const cy = (manualState.snappedY + start.y) / 2;
-      manualState.elements.push({ type: 'rect', x: cx, y: cy, w: w, h: h });
-      manualState.isDrawing = false;
-      manualState.points = [];
-    }
-  }
-  updatePropsBody();
-  drawManualSketch();
-}
-
-function onManualMouseUp(e) {}
-
-function drawManualSketch() {
-  if (!manualState.ctx) return;
-  const ctx = manualState.ctx;
-  ctx.clearRect(0, 0, manualState.width, manualState.height);
-  
-  const ox = manualState.centerX;
-  const oy = manualState.centerY;
-  const p = manualState.pxPerMm;
-  
-  // Draw Axes
-  ctx.strokeStyle = '#333';
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.moveTo(ox, 0); ctx.lineTo(ox, manualState.height);
-  ctx.moveTo(0, oy); ctx.lineTo(manualState.width, oy);
-  ctx.stroke();
-
-  // Draw Grid
-  ctx.strokeStyle = '#222';
-  const gridPx = manualState.gridSize * p;
-  ctx.beginPath();
-  for (let x = ox % gridPx; x < manualState.width; x += gridPx) { ctx.moveTo(x, 0); ctx.lineTo(x, manualState.height); }
-  for (let y = oy % gridPx; y < manualState.height; y += gridPx) { ctx.moveTo(0, y); ctx.lineTo(manualState.width, y); }
-  ctx.stroke();
-
-  // Draw Elements
-  ctx.strokeStyle = '#0078d4';
-  ctx.fillStyle = 'rgba(0,120,212,0.1)';
-  ctx.lineWidth = 2;
-  
-  for (const el of manualState.elements) {
-    ctx.beginPath();
-    if (el.type === 'polyline') {
-      el.points.forEach((pt, i) => {
-        const x = ox + pt.x * p;
-        const y = oy - pt.y * p;
-        if (i === 0) ctx.moveTo(x, y);
-        else ctx.lineTo(x, y);
-      });
-      ctx.lineTo(ox + el.points[0].x * p, oy - el.points[0].y * p); // closed
-      ctx.fill();
-    } else if (el.type === 'circle') {
-      ctx.arc(ox + el.x * p, oy - el.y * p, el.r * p, 0, Math.PI * 2);
-      ctx.fill();
-    } else if (el.type === 'rect') {
-      ctx.rect(ox + (el.x - el.w/2) * p, oy - (el.y + el.h/2) * p, el.w * p, el.h * p);
-      ctx.fill();
-    }
-    ctx.stroke();
-  }
-  
-  // Draw current drawing state
-  if (manualState.isDrawing && manualState.points.length > 0) {
-    ctx.strokeStyle = '#ff8c00';
-    ctx.beginPath();
-    if (manualState.currentTool === 'line') {
-      manualState.points.forEach((pt, i) => {
-        const x = ox + pt.x * p;
-        const y = oy - pt.y * p;
-        if (i === 0) ctx.moveTo(x, y);
-        else ctx.lineTo(x, y);
-      });
-      ctx.lineTo(ox + manualState.snappedX * p, oy - manualState.snappedY * p);
-    } else if (manualState.currentTool === 'circle') {
-      const start = manualState.points[0];
-      const dx = manualState.snappedX - start.x;
-      const dy = manualState.snappedY - start.y;
-      const r = Math.sqrt(dx*dx + dy*dy);
-      ctx.arc(ox + start.x * p, oy - start.y * p, r * p, 0, Math.PI * 2);
-    } else if (manualState.currentTool === 'rectangle') {
-      const start = manualState.points[0];
-      const w = manualState.snappedX - start.x;
-      const h = manualState.snappedY - start.y;
-      ctx.rect(ox + start.x * p, oy - start.y * p, w * p, -h * p);
-    }
-    ctx.stroke();
-  }
-  
-  // Snap point cursor
-  ctx.fillStyle = '#ff8c00';
-  ctx.beginPath();
-  ctx.arc(ox + manualState.snappedX * p, oy - manualState.snappedY * p, 3, 0, Math.PI * 2);
-  ctx.fill();
-}
-
-window.manualToolImpl = function(tool) {
-  if (tool === 'extrude') {
-    executeManualExtrude();
-    return;
-  }
-  manualState.currentTool = tool;
-  manualState.isDrawing = false;
-  manualState.points = [];
-  
-  if (!manualState.ctx) initManualSketcher();
-};
-
-function updatePropsBody() {
-  const pb = document.querySelector('#contentManual .props-body');
-  if (!pb) return;
-  if (manualState.elements.length === 0) {
-    pb.innerHTML = '<div style="padding:12px;color:var(--text-dim);font-size:11px;">No elements</div>';
-    return;
-  }
-  pb.innerHTML = manualState.elements.map((el, i) => {
-    let desc = el.type;
-    if (el.type === 'circle') desc += ` (r=${el.r.toFixed(1)})`;
-    if (el.type === 'rect') desc += ` (${el.w.toFixed(1)}x${el.h.toFixed(1)})`;
-    if (el.type === 'polyline') desc += ` (${el.points.length} pts)`;
-    return `<div style="padding: 6px 12px; border-bottom: 1px solid var(--border); font-size: 12px;">${desc} <span style="float:right; cursor:pointer; color:var(--text-dim);" onclick="manualState.elements.splice(${i}, 1); updatePropsBody(); drawManualSketch();">✕</span></div>`;
-  }).join('');
-}
-
-async function executeManualExtrude() {
-  if (manualState.elements.length === 0) {
-    showToast('Sketch is empty!');
-    return;
-  }
-  
-  // Generate CadQuery script
-  let script = 'import cadquery as cq\n\nres = cq.Workplane("XY")\n';
-  
-  let hasGeometry = false;
-  
-  for (const el of manualState.elements) {
-    if (el.type === 'polyline' && el.points.length > 2) {
-      script += `res = res.moveTo(${el.points[0].x}, ${el.points[0].y})\n`;
-      for (let i = 1; i < el.points.length; i++) {
-        script += `res = res.lineTo(${el.points[i].x}, ${el.points[i].y})\n`;
-      }
-      script += `res = res.close()\n`;
-      hasGeometry = true;
-    } else if (el.type === 'circle') {
-      script += `res = res.center(${el.x}, ${el.y}).circle(${el.r}).center(${-el.x}, ${-el.y})\n`;
-      hasGeometry = true;
-    } else if (el.type === 'rect') {
-      script += `res = res.center(${el.x}, ${el.y}).rect(${el.w}, ${el.h}).center(${-el.x}, ${-el.y})\n`;
-      hasGeometry = true;
-    }
-  }
-  
-  if (!hasGeometry) { showToast('No valid profiles to extrude'); return; }
-  
-  // Assuming default extrude depth of 10mm
-  script += `result = res.extrude(10)\n`;
-  
-  showToast('Extruding sketch...');
-  
-  try {
-    const res = await fetch('/run-script', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ script })
-    });
-    const data = await res.json();
-    if (data.error) {
-      showToast('Error: ' + data.error);
-      return;
+function initSketchForFace(faceSelector, blockId) {
+    sketch.faceContext = faceSelector;
+    sketch.blockId = blockId;
+    sketch.elements = [];
+    
+    // Update face context indicator
+    const indicator = document.getElementById('sketchFaceIndicator');
+    if (indicator) {
+        indicator.textContent = `Editing face: ${getFaceLabelFromSelector(faceSelector)} of BLOCK_${blockId}`;
     }
     
-    if (data.job_id) {
-      // Instead of waiting, we can switch to editor/prompt tab to see the result, 
-      // or we can embed the viewer in the manual tab! Let's switch to the Prompt tab.
-      switchTab('prompt');
-      canvas.currentJobId = data.job_id;
-      canvas.script = script;
-      connectSSE(data.job_id);
-    }
-  } catch(e) {
-    showToast('Failed to extrude: ' + e.message);
-  }
+    if (!sketch.canvas) initSketch();
+    drawGrid();
 }
+
+function resizeSketchCanvas() {
+    if (!sketch.canvas) return;
+    const container = sketch.canvas.parentElement;
+    sketch.canvas.width = container.clientWidth;
+    sketch.canvas.height = container.clientHeight;
+    sketch.offsetX = sketch.canvas.width / 2;
+    sketch.offsetY = sketch.canvas.height / 2;
+    redrawSketch();
+}
+
+function drawGrid() {
+    const ctx = sketch.ctx;
+    if (!ctx) return;
+    const W = sketch.canvas.width;
+    const H = sketch.canvas.height;
+    
+    ctx.clearRect(0, 0, W, H);
+    
+    // Background
+    ctx.fillStyle = '#141414';
+    ctx.fillRect(0, 0, W, H);
+    
+    // Grid lines
+    const gridMm = sketch.snapGrid;
+    const gridPx = gridMm * sketch.scale;
+    
+    ctx.strokeStyle = '#2a2a2a';
+    ctx.lineWidth = 0.5;
+    
+    // Minor grid
+    for (let x = sketch.offsetX % gridPx; x < W; x += gridPx) {
+        ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
+    }
+    for (let y = sketch.offsetY % gridPx; y < H; y += gridPx) {
+        ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+    }
+    
+    // Major grid (every 5 minor)
+    ctx.strokeStyle = '#333333';
+    ctx.lineWidth = 1;
+    const majorPx = gridPx * 5;
+    for (let x = sketch.offsetX % majorPx; x < W; x += majorPx) {
+        ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
+    }
+    for (let y = sketch.offsetY % majorPx; y < H; y += majorPx) {
+        ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+    }
+    
+    // Origin axes
+    ctx.strokeStyle = '#3d3d3d';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(sketch.offsetX, 0); ctx.lineTo(sketch.offsetX, H); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(0, sketch.offsetY); ctx.lineTo(W, sketch.offsetY); ctx.stroke();
+    
+    // Origin label
+    ctx.fillStyle = '#555';
+    ctx.font = '10px Consolas';
+    ctx.fillText('0,0', sketch.offsetX + 4, sketch.offsetY - 4);
+}
+
+function redrawSketch() {
+    drawGrid();
+    drawElements();
+    drawDimensions();
+}
+
+function drawElements() {
+    const ctx = sketch.ctx;
+    sketch.elements.forEach(el => {
+        ctx.strokeStyle = el.selected ? '#0078d4' : '#cccccc';
+        ctx.lineWidth = el.selected ? 2 : 1.5;
+        ctx.fillStyle = 'transparent';
+        
+        if (el.type === 'line') {
+            ctx.beginPath();
+            ctx.moveTo(mmToPx(el.x1), mmToPx(el.y1));
+            ctx.lineTo(mmToPx(el.x2), mmToPx(el.y2));
+            ctx.stroke();
+            
+            // Dimension label
+            const mx = (mmToPx(el.x1) + mmToPx(el.x2)) / 2;
+            const my = (mmToPx(el.y1) + mmToPx(el.y2)) / 2;
+            const len = Math.sqrt((el.x2-el.x1)**2 + (el.y2-el.y1)**2).toFixed(1);
+            ctx.fillStyle = '#666';
+            ctx.font = '9px Consolas';
+            ctx.fillText(`${len}mm`, mx + 4, my - 4);
+            
+        } else if (el.type === 'circle') {
+            ctx.beginPath();
+            ctx.arc(mmToPx(el.cx), mmToPx(el.cy), el.r * sketch.scale, 0, Math.PI*2);
+            ctx.stroke();
+            
+            // Center cross
+            ctx.strokeStyle = '#444';
+            ctx.lineWidth = 0.5;
+            const cx = mmToPx(el.cx), cy = mmToPx(el.cy), cs = 6;
+            ctx.beginPath(); ctx.moveTo(cx-cs,cy); ctx.lineTo(cx+cs,cy); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(cx,cy-cs); ctx.lineTo(cx,cy+cs); ctx.stroke();
+            
+            ctx.fillStyle = '#666';
+            ctx.font = '9px Consolas';
+            ctx.fillText(`⌀${(el.r*2).toFixed(1)}mm`, mmToPx(el.cx)+el.r*sketch.scale+4, mmToPx(el.cy));
+            
+        } else if (el.type === 'rect') {
+            ctx.strokeRect(mmToPx(el.x), mmToPx(el.y), el.w*sketch.scale, el.h*sketch.scale);
+            ctx.fillStyle = '#666';
+            ctx.font = '9px Consolas';
+            ctx.fillText(`${el.w}×${el.h}mm`, mmToPx(el.x)+4, mmToPx(el.y)-4);
+        }
+    });
+}
+
+function drawDimensions() {
+    // Auto dimension annotations for all elements
+    // Already handled inline in drawElements
+}
+
+// Coordinate conversions
+function mmToPx(mm) { return sketch.offsetX + mm * sketch.scale; }
+function pxToMm(px) { return (px - sketch.offsetX) / sketch.scale; }
+function snapToGrid(mm) { return Math.round(mm / sketch.snapGrid) * sketch.snapGrid; }
+
+// Mouse events
+function onSketchMouseDown(e) {
+    const rect = sketch.canvas.getBoundingClientRect();
+    const px = e.clientX - rect.left;
+    const py = e.clientY - rect.top;
+    const mx = snapToGrid(pxToMm(px));
+    const my = snapToGrid(pxToMm(py));
+    
+    sketch.drawing = true;
+    sketch.startX = mx;
+    sketch.startY = my;
+    sketch.tempEl = null;
+}
+
+function onSketchMouseMove(e) {
+    const rect = sketch.canvas.getBoundingClientRect();
+    const px = e.clientX - rect.left;
+    const py = e.clientY - rect.top;
+    const mx = snapToGrid(pxToMm(px));
+    const my = snapToGrid(pxToMm(py));
+    
+    // Update cursor coords in status bar
+    document.getElementById('coords').textContent = 
+        `x: ${mx.toFixed(1)}  y: ${my.toFixed(1)}  z: 0.0`;
+    
+    if (!sketch.drawing) return;
+    
+    // Preview current element
+    redrawSketch();
+    
+    const ctx = sketch.ctx;
+    ctx.strokeStyle = '#0078d4';
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([4, 4]);
+    
+    if (sketch.tool === 'line') {
+        ctx.beginPath();
+        ctx.moveTo(mmToPx(sketch.startX), mmToPx(sketch.startY));
+        ctx.lineTo(px, py);
+        ctx.stroke();
+    } else if (sketch.tool === 'circle') {
+        const r = Math.sqrt((mx-sketch.startX)**2 + (my-sketch.startY)**2);
+        ctx.beginPath();
+        ctx.arc(mmToPx(sketch.startX), mmToPx(sketch.startY), r*sketch.scale, 0, Math.PI*2);
+        ctx.stroke();
+    } else if (sketch.tool === 'rectangle') {
+        ctx.strokeRect(mmToPx(sketch.startX), mmToPx(sketch.startY), 
+                      (mx-sketch.startX)*sketch.scale, (my-sketch.startY)*sketch.scale);
+    }
+    
+    ctx.setLineDash([]);
+}
+
+function onSketchMouseUp(e) {
+    if (!sketch.drawing) return;
+    sketch.drawing = false;
+    
+    const rect = sketch.canvas.getBoundingClientRect();
+    const px = e.clientX - rect.left;
+    const py = e.clientY - rect.top;
+    const mx = snapToGrid(pxToMm(px));
+    const my = snapToGrid(pxToMm(py));
+    
+    if (Math.abs(mx - sketch.startX) < 1 && Math.abs(my - sketch.startY) < 1) return;
+    
+    if (sketch.tool === 'line') {
+        sketch.elements.push({ type:'line', x1:sketch.startX, y1:sketch.startY, x2:mx, y2:my });
+    } else if (sketch.tool === 'circle') {
+        const r = Math.sqrt((mx-sketch.startX)**2 + (my-sketch.startY)**2);
+        sketch.elements.push({ type:'circle', cx:sketch.startX, cy:sketch.startY, r });
+    } else if (sketch.tool === 'rectangle') {
+        sketch.elements.push({ type:'rect', x:sketch.startX, y:sketch.startY, 
+                               w:mx-sketch.startX, h:my-sketch.startY });
+    }
+    
+    redrawSketch();
+}
+
+function onSketchWheel(e) {
+    e.preventDefault();
+    const factor = e.deltaY > 0 ? 0.9 : 1.1;
+    sketch.scale *= factor;
+    sketch.scale = Math.max(0.5, Math.min(20, sketch.scale));
+    redrawSketch();
+}
+
+// Tool selection
+function setSketchTool(tool) {
+    sketch.tool = tool;
+    document.querySelectorAll('.sketch-tool').forEach(el => el.classList.remove('active'));
+    const btn = document.querySelector(`[data-tool="${tool}"]`);
+    if (btn) btn.classList.add('active');
+    sketch.canvas.style.cursor = tool === 'select' ? 'default' : 'crosshair';
+}
+
+// Extrude from sketch
+async function extrudeSketch(depth) {
+    if (sketch.elements.length === 0) {
+        showToast('Draw a profile first'); return;
+    }
+    
+    // Convert sketch elements to CadQuery script addition
+    const profile = sketchToCADQuery();
+    const instruction = `Add this profile extruded ${depth}mm on face ${sketch.faceContext}: ${profile}`;
+    
+    switchTab('prompt');
+    document.getElementById('aiInput').value = instruction;
+    await submitChat(instruction);
+}
+
+function sketchToCADQuery() {
+    // Convert sketch elements to natural language description for AI
+    const descriptions = sketch.elements.map(el => {
+        if (el.type === 'circle') return `circle diameter ${(el.r*2).toFixed(1)}mm at ${el.cx},${el.cy}`;
+        if (el.type === 'rect') return `rectangle ${el.w}x${el.h}mm at ${el.x},${el.y}`;
+        if (el.type === 'line') return `line from ${el.x1},${el.y1} to ${el.x2},${el.y2}`;
+        return '';
+    });
+    return descriptions.join('; ');
+}
+
+// Clear sketch
+function clearSketch() {
+    sketch.elements = [];
+    redrawSketch();
+}
+
+// Initialize on load
+document.addEventListener('DOMContentLoaded', () => {
+    // Only init when Manual tab is active
+    const manualTab = document.getElementById('tabManual');
+    if (manualTab) {
+        manualTab.addEventListener('click', () => {
+            setTimeout(initSketch, 100);
+        });
+    }
+});

@@ -158,10 +158,26 @@
     <!-- Center: Viewport -->
     <div class="center-area">
       <div class="canvas-area" id="manualViewport">
-        <div class="canvas-empty-state">
-          <div class="canvas-empty-icon">✏</div>
-          <div class="canvas-empty-title">Manual Sketch Mode</div>
-          <div class="canvas-empty-sub">Select a sketch tool from the left panel to begin drawing.<br>Full 2D sketch → 3D extrude workflow coming in the next version.</div>
+        <!-- Manual Tab Canvas Area -->
+        <div class="sketch-container" id="sketchContainer">
+            <div class="sketch-face-indicator" id="sketchFaceIndicator">
+                Select a face in Prompt tab and click "Edit in 2D" to start sketching
+            </div>
+            <canvas id="sketchCanvas"></canvas>
+            <div class="sketch-bottom-bar">
+                <button onclick="setSketchTool('select')" data-tool="select" class="sketch-tool-btn">Select</button>
+                <button onclick="setSketchTool('line')" data-tool="line" class="sketch-tool-btn">/ Line</button>
+                <button onclick="setSketchTool('circle')" data-tool="circle" class="sketch-tool-btn">○ Circle</button>
+                <button onclick="setSketchTool('rectangle')" data-tool="rectangle" class="sketch-tool-btn">□ Rect</button>
+                <div class="sketch-bar-sep"></div>
+                <button onclick="clearSketch()" class="sketch-tool-btn">Clear</button>
+                <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
+                    <label style="font-size:11px;color:var(--text-secondary)">Extrude depth</label>
+                    <input type="number" id="extrudeDepth" value="10" style="width:60px;background:var(--bg-primary);border:1px solid var(--border);color:var(--text-primary);padding:4px;font-size:11px">
+                    <span style="font-size:11px;color:var(--text-dim)">mm</span>
+                    <button onclick="extrudeSketch(document.getElementById('extrudeDepth').value)" class="btn-app-primary">Extrude →</button>
+                </div>
+            </div>
         </div>
       </div>
     </div>
@@ -233,6 +249,11 @@
             <span class="template-group-arrow">▼</span> Structural
           </div>
           <div class="template-group-items">
+            <div class="template-item" onclick="onTemplateClick('motor_mount')">
+              <span class="template-item-icon">M</span>
+              <span class="template-item-name">NEMA 17 Mount</span>
+              <span class="template-item-add">+</span>
+            </div>
             <div class="template-item" onclick="onTemplateClick('bracket')">
               <span class="template-item-icon">L</span>
               <span class="template-item-name">L-Bracket</span>
@@ -294,6 +315,11 @@
             <span class="template-group-arrow">▼</span> Enclosures
           </div>
           <div class="template-group-items">
+            <div class="template-item" onclick="onTemplateClick('raspberry_pi')">
+              <span class="template-item-icon">π</span>
+              <span class="template-item-name">Raspberry Pi Case</span>
+              <span class="template-item-add">+</span>
+            </div>
             <div class="template-item" onclick="onTemplateClick('housing')">
               <span class="template-item-icon">⊞</span>
               <span class="template-item-name">Housing</span>
