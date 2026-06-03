@@ -210,7 +210,7 @@ window.addBlockToSession = async function(blockType) {
 window.applyOp = async function(opType) {
   if (!canvas.sessionId) { showToast('Generate a part first'); return; }
 
-  const faceSelector = window.clickedFaceSelector || '>Z';
+  const faceSelector = window.clickedFaceSelector || '>Y';
   const parentId = canvas.selectedBlockId || '001';
   let blockType = opType;
   let params = {};

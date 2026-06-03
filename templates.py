@@ -277,6 +277,16 @@ BASE_TEMPLATES = {
 # ═══════════════════════════════════════════════════════════════════
 
 def get_working_plane(result, face_selector=">Y"):
+    """Get the workplane for the selected face.
+    Uses the explicit face_selector from the user's 3D click.
+    Only falls back to base_top tag when using the default >Y face."""
+    if face_selector != ">Y":
+        # User explicitly selected a non-default face — use it directly
+        try:
+            return result.faces(face_selector).workplane()
+        except Exception:
+            pass
+    # Default face or fallback: try the tagged workplane first
     try:
         return result.workplaneFromTagged("base_top")
     except Exception:
