@@ -110,6 +110,29 @@ function showAddGeometryDialog(templateType, params) {
   document.getElementById('modalBackdrop').classList.add('visible');
 }
 
+window.toggleGizmo = function(mode) {
+    if (window.viewerInstance) {
+        window.viewerInstance.setGizmoEnabled(true);
+        window.viewerInstance.setGizmoMode(mode);
+        
+        if (window.selectedAssemblyPartIndex !== null && window.selectedAssemblyPartIndex !== undefined) {
+            const p = assemblyParts[window.selectedAssemblyPartIndex];
+            if (p) {
+                const partName = p.template + '_' + (window.selectedAssemblyPartIndex + 1);
+                window.viewerInstance.attachGizmoToPart(partName);
+            }
+        } else if (canvas.selectedBlockId) {
+            window.viewerInstance.attachGizmoToPart('part_' + canvas.selectedBlockId);
+        }
+    }
+};
+
+window.disableGizmo = function() {
+    if (window.viewerInstance) {
+        window.viewerInstance.setGizmoEnabled(false);
+    }
+};
+
 window.closeModal = function() {
   document.getElementById('modalBackdrop').classList.remove('visible');
 };
@@ -342,6 +365,10 @@ window.selectBlock = function(blockId) {
   const block = canvas.blocks.find(b => b.id === blockId);
   if (block) renderPropsPanel(block);
   renderAssemblyTree();
+  
+  if (window.viewerInstance) {
+      window.viewerInstance.attachGizmoToPart('part_' + blockId);
+  }
 };
 
 // ═══════════════════════════════════════════════════════════════
@@ -530,6 +557,86 @@ window.setupFaceSelection = function(viewer) {
   viewer.onMouseMove3D = function(coords) {
     const el = document.getElementById('coords');
     if (el) el.textContent = `x: ${coords.x}  y: ${coords.y}  z: ${coords.z}`;
+  };
+
+  viewer.onTransformEnd = async function({meshName, position, rotation}) {
+      let isBlockEngine = false;
+      let partId = null;
+      let assemblyPartIndex = -1;
+
+      if (meshName.startsWith('part_')) {
+          partId = meshName.replace('part_', '');
+          isBlockEngine = true;
+      } else {
+          assemblyPartIndex = assemblyParts.findIndex((p, i) => `${p.template}_${i+1}` === meshName);
+          if (assemblyPartIndex === -1) return;
+      }
+      
+      if (isBlockEngine) {
+          // Block engine (id is like 001, 002)
+          showGenOverlay('Updating position...');
+          
+          // Send 3 separate param updates for position
+          const px = Math.round(position.x * 10) / 10;
+          const py = Math.round(position.y * 10) / 10;
+          const pz = Math.round(position.z * 10) / 10;
+          
+          await fetch('/canvas/update-param', {
+              method: 'POST', headers: {'Content-Type': 'application/json'},
+              body: JSON.stringify({session_id: canvas.sessionId, block_id: partId, param_key: 'x', new_value: px})
+          });
+          await fetch('/canvas/update-param', {
+              method: 'POST', headers: {'Content-Type': 'application/json'},
+              body: JSON.stringify({session_id: canvas.sessionId, block_id: partId, param_key: 'y', new_value: py})
+          });
+          await fetch('/canvas/update-param', {
+              method: 'POST', headers: {'Content-Type': 'application/json'},
+              body: JSON.stringify({session_id: canvas.sessionId, block_id: partId, param_key: 'z', new_value: pz})
+          });
+
+          // Send 3 param updates for rotation (in degrees)
+          const rx = Math.round(rotation.x * (180 / Math.PI));
+          const ry = Math.round(rotation.y * (180 / Math.PI));
+          const rz = Math.round(rotation.z * (180 / Math.PI));
+
+          await fetch('/canvas/update-param', {
+              method: 'POST', headers: {'Content-Type': 'application/json'},
+              body: JSON.stringify({session_id: canvas.sessionId, block_id: partId, param_key: 'rot_x', new_value: rx})
+          });
+          await fetch('/canvas/update-param', {
+              method: 'POST', headers: {'Content-Type': 'application/json'},
+              body: JSON.stringify({session_id: canvas.sessionId, block_id: partId, param_key: 'rot_y', new_value: ry})
+          });
+          const res = await fetch('/canvas/update-param', {
+              method: 'POST', headers: {'Content-Type': 'application/json'},
+              body: JSON.stringify({session_id: canvas.sessionId, block_id: partId, param_key: 'rot_z', new_value: rz})
+          });
+
+          const data = await res.json();
+          if (data.job_id) {
+              canvas.currentJobId = data.job_id;
+              connectSSE(data.job_id);
+              await loadBlocks();
+          }
+          hideGenOverlay();
+      } else {
+          // Assembly engine
+          const partIndex = assemblyPartIndex;
+          if (assemblyParts[partIndex]) {
+              assemblyParts[partIndex].position = { 
+                  x: Math.round(position.x * 10) / 10, 
+                  y: Math.round(position.y * 10) / 10, 
+                  z: Math.round(position.z * 10) / 10 
+              };
+              assemblyParts[partIndex].rotation = {
+                  rot_x: Math.round(rotation.x * (180 / Math.PI)),
+                  rot_y: Math.round(rotation.y * (180 / Math.PI)),
+                  rot_z: Math.round(rotation.z * (180 / Math.PI))
+              };
+              renderAssemblyBuilder();
+              buildCustomAssembly();
+          }
+      }
   };
 };
 
@@ -1289,8 +1396,12 @@ function executeJobPromise(jobId) {
         if (entry.complete || entry.status === 'completed') {
           es.close();
           updateStatus('Ready');
-          if (window.viewerInstance && entry.has_stl_file !== false) {
-            window.viewerInstance.loadSTL(`/model/${jobId}`);
+          if (window.viewerInstance) {
+            if (entry.has_glb_file) {
+                window.viewerInstance.loadGLTF(`/model_glb/${jobId}`, true);
+            } else if (entry.has_stl_file !== false) {
+                window.viewerInstance.loadSTL(`/model/${jobId}`);
+            }
           }
           saveToHistory();
           resolve(jobId);
@@ -1389,3 +1500,97 @@ loadBlocks = async function() {
   await originalLoadBlocks();
   renderMatesList();
 };
+
+// ── ASSEMBLY ENGINE ────────────────────────────────────────────
+
+const assemblyParts = [];
+
+
+
+function addAssemblyPart() {
+    const templates = ['bracket','plate','shaft','housing','crankshaft','piston','connecting_rod','cylinder_block'];
+    const type = templates[assemblyParts.length % templates.length];
+    
+    assemblyParts.push({
+        template: type,
+        params: {},
+        position: {x: assemblyParts.length * 50, y: 0, z: 0},
+        rotation: {axis: 'Z', angle: 0}
+    });
+    
+    renderAssemblyBuilder();
+}
+window.addAssemblyPart = addAssemblyPart;
+
+window.selectedAssemblyPartIndex = null;
+
+window.selectAssemblyPart = function(index) {
+    window.selectedAssemblyPartIndex = index;
+    renderAssemblyBuilder();
+    if (window.viewerInstance) {
+        const p = assemblyParts[index];
+        const partName = p.template + '_' + (index + 1);
+        window.viewerInstance.attachGizmoToPart(partName);
+    }
+};
+
+function renderAssemblyBuilder() {
+    const container = document.getElementById('assemblyPartsList');
+    container.innerHTML = assemblyParts.map((p, i) => `
+        <div class="assembly-part-row ${i === window.selectedAssemblyPartIndex ? 'selected' : ''}" onclick="selectAssemblyPart(${i})">
+            <select onchange="assemblyParts[${i}].template=this.value" class="prop-select" onclick="event.stopPropagation()">
+                ${['bracket','plate','shaft','housing','crankshaft','piston','connecting_rod','cylinder_block']
+                    .map(t => `<option value="${t}" ${p.template===t?'selected':''}>${t}</option>`).join('')}
+            </select>
+            <div class="part-pos-row" onclick="event.stopPropagation()">
+                <span class="prop-label">X</span>
+                <input type="number" value="${p.position.x}" class="prop-input" style="width:50px"
+                       onchange="assemblyParts[${i}].position.x=parseFloat(this.value)">
+                <span class="prop-label">Y</span>
+                <input type="number" value="${p.position.y}" class="prop-input" style="width:50px"
+                       onchange="assemblyParts[${i}].position.y=parseFloat(this.value)">
+                <span class="prop-label">Z</span>
+                <input type="number" value="${p.position.z}" class="prop-input" style="width:50px"
+                       onchange="assemblyParts[${i}].position.z=parseFloat(this.value)">
+            </div>
+            <button onclick="event.stopPropagation(); assemblyParts.splice(${i},1); renderAssemblyBuilder()" 
+                    class="tree-node-del">✕</button>
+        </div>
+    `).join('');
+}
+window.renderAssemblyBuilder = renderAssemblyBuilder;
+
+async function buildCustomAssembly() {
+    if (assemblyParts.length === 0) { showToast('Add parts first'); return; }
+    
+    showGenerationOverlay('Building custom assembly...');
+    
+    const res = await fetch('/assembly/build', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({parts: assemblyParts})
+    });
+    
+    const data = await res.json();
+    if (data.job_id) {
+        connectSSE(data.job_id, onLog, async (status) => {
+            hideGenerationOverlay();
+            if (status === 'done') {
+                if (window.viewerInstance) {
+                    window.viewerInstance.loadGLTF(`/model_glb/${data.job_id}`);
+                }
+                window.currentJobId = data.job_id;
+                document.getElementById('downloadBtn').style.display = 'block';
+                addChatMsg('success', `Assembly built: ${assemblyParts.length} parts`);
+                
+                // Load script into editor
+                const scriptRes = await fetch(`/assembly/script/${data.job_id}`);
+                const scriptData = await scriptRes.json();
+                if (scriptData.script && window.monacoInstance) {
+                    window.monacoInstance.setValue(scriptData.script);
+                }
+            }
+        });
+    }
+}
+window.buildCustomAssembly = buildCustomAssembly;

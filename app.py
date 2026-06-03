@@ -334,6 +334,7 @@ def execute_cadquery(script: str, job_id: str):
     """Write script to temp file, run via Miniconda, return (success, error_msg)."""
     step_path = os.path.join(TEMP_DIR, f"{job_id}.step")
     stl_path = os.path.join(TEMP_DIR, f"{job_id}.stl")
+    glb_path = os.path.join(TEMP_DIR, f"{job_id}.glb")
     script_path = os.path.join(TEMP_DIR, f"{job_id}.py")
 
     # Build the full script with output_path injected at the top,
@@ -345,6 +346,7 @@ def execute_cadquery(script: str, job_id: str):
         f'sys.path.insert(0, r"H:\\DesignOS")\n'
         f'output_path = r"{step_path}"\n'
         f'stl_output_path = r"{stl_path}"\n'
+        f'glb_output_path = r"{glb_path}"\n'
         '\n'
         '# --- DesignOS mock show_object ---\n'
         '_designos_export_target = None\n'
@@ -376,16 +378,19 @@ if _designos_export_target is not None:
         if not _os.path.exists(output_path):
             if isinstance(_designos_export_target, _cq.Assembly):
                 _designos_export_target.save(output_path)
-            else:
-                _cq.exporters.export(_designos_export_target, output_path)
-    except Exception:
-        pass
-    try:
-        if not _os.path.exists(stl_output_path):
-            if isinstance(_designos_export_target, _cq.Assembly):
-                _designos_export_target.save(stl_output_path, exportType='STL')
-            else:
-                _cq.exporters.export(_designos_export_target, stl_output_path, exportType=_cq.exporters.ExportTypes.STL)
+        # We save STL for simple viewing, GLB for interactive assemblies, and STEP as the source of truth.
+        if isinstance(_designos_export_target, _cq.Assembly):
+            _designos_export_target.save(output_path)
+            _designos_export_target.save(stl_output_path, exportType='STL')
+            _designos_export_target.save(glb_output_path) # Auto-detects GLTF/GLB
+        else:
+            _cq.exporters.export(_designos_export_target, output_path)
+            _cq.exporters.export(_designos_export_target, stl_output_path)
+            
+            # Single bodies can be added to an assembly just to export as GLB
+            temp_assy = _cq.Assembly()
+            temp_assy.add(_designos_export_target, name="part_001")
+            temp_assy.save(glb_output_path)
     except Exception:
         pass
 '''
@@ -512,9 +517,12 @@ def run_generation(job_id: str, prompt: str, form_data: dict = None, max_attempt
 
                 jobs[job_id]["status"] = "completed"
                 jobs[job_id]["step"] = "done"
+                step_path = os.path.join(TEMP_DIR, f"{job_id}.step")
                 stl_path = os.path.join(TEMP_DIR, f"{job_id}.stl")
+                glb_path = os.path.join(TEMP_DIR, f"{job_id}.glb")
                 jobs[job_id]["step_file"] = step_path
                 jobs[job_id]["stl_file"] = stl_path if os.path.exists(stl_path) else None
+                jobs[job_id]["glb_file"] = glb_path if os.path.exists(glb_path) else None
                 _log(job_id, "complete", "done", "Model generated successfully")
                 return
 
@@ -551,13 +559,15 @@ def run_manual_script(job_id: str, script: str):
         success, error = execute_cadquery(script, job_id)
         
         if success:
-            _log(job_id, "execute", "done", "STEP + STL files generated successfully")
+            _log(job_id, "execute", "done", "STEP + STL + GLB files generated successfully")
             jobs[job_id]["status"] = "completed"
             jobs[job_id]["step"] = "done"
             step_path = os.path.join(TEMP_DIR, f"{job_id}.step")
             stl_path = os.path.join(TEMP_DIR, f"{job_id}.stl")
+            glb_path = os.path.join(TEMP_DIR, f"{job_id}.glb")
             jobs[job_id]["step_file"] = step_path
             jobs[job_id]["stl_file"] = stl_path if os.path.exists(stl_path) else None
+            jobs[job_id]["glb_file"] = glb_path if os.path.exists(glb_path) else None
         else:
             jobs[job_id]["status"] = "failed"
             jobs[job_id]["step"] = "failed"
@@ -584,6 +594,7 @@ def _new_job(prompt: str) -> str:
         "spec": None,
         "step_file": None,
         "stl_file": None,
+        "glb_file": None,
         "error": None,
         "prompt": prompt,
     }
@@ -649,7 +660,8 @@ def status(job_id):
         # Fallback to check if generated files exist in TEMP_DIR
         step_path = os.path.join(TEMP_DIR, f"{job_id}.step")
         stl_path = os.path.join(TEMP_DIR, f"{job_id}.stl")
-        if os.path.exists(step_path) or os.path.exists(stl_path):
+        glb_path = os.path.join(TEMP_DIR, f"{job_id}.glb")
+        if os.path.exists(step_path) or os.path.exists(stl_path) or os.path.exists(glb_path):
             return jsonify({
                 "status": "completed",
                 "step": "done",
@@ -658,6 +670,7 @@ def status(job_id):
                 "log": [{"step": "complete", "stage": "complete", "status": "done", "message": "Model restored from cache", "ts": time.time()}],
                 "has_step_file": os.path.exists(step_path),
                 "has_stl_file": os.path.exists(stl_path),
+                "has_glb_file": os.path.exists(glb_path),
                 "error": None,
                 "script": ""
             })
@@ -671,6 +684,7 @@ def status(job_id):
         "log": j["log"],
         "has_step_file": j["step_file"] is not None,
         "has_stl_file": j["stl_file"] is not None,
+        "has_glb_file": j["glb_file"] is not None,
         "error": j["error"],
         "script": j.get("script", "")
     })
@@ -694,6 +708,7 @@ def stream_job(job_id):
                 final = {"status": job["status"], "complete": True,
                          "has_stl_file": job.get("stl_file") is not None,
                          "has_step_file": job.get("step_file") is not None,
+                         "has_glb_file": job.get("glb_file") is not None,
                          "script": job.get("script", ""),
                          "error": job.get("error")}
                 yield f"data: {json.dumps(final)}\n\n"
@@ -736,6 +751,23 @@ def model_stl(job_id):
     if not stl_file:
         return jsonify({"error": "STL not found"}), 404
     return send_file(stl_file, mimetype="application/octet-stream")
+
+
+@app.route("/model_glb/<job_id>")
+def serve_model_glb(job_id):
+    """Serve the generated GLB (GLTF) file."""
+    if job_id not in jobs:
+        # Fallback to check if generated files exist in TEMP_DIR
+        path = os.path.join(TEMP_DIR, f"{job_id}.glb")
+        if os.path.exists(path):
+            return send_file(path, mimetype="model/gltf-binary")
+        return "Not found", 404
+        
+    glb_path = jobs[job_id].get("glb_file")
+    if not glb_path or not os.path.exists(glb_path):
+        return "GLB not ready or failed", 404
+        
+    return send_file(glb_path, mimetype="model/gltf-binary")
 
 
 @app.route("/health")
@@ -844,6 +876,7 @@ def run_script():
         if success:
             jobs[job_id]["step_file"] = os.path.join(TEMP_DIR, f"{job_id}.step")
             jobs[job_id]["stl_file"] = os.path.join(TEMP_DIR, f"{job_id}.stl")
+            jobs[job_id]["glb_file"] = os.path.join(TEMP_DIR, f"{job_id}.glb")
         _log(job_id, "complete", "done" if success else "error", error or "Script executed successfully")
     threading.Thread(target=execute, daemon=True).start()
     return jsonify({"job_id": job_id})
@@ -883,6 +916,47 @@ Rules:
         return jsonify({"script": script})
     except Exception as exc:
         return jsonify({"error": f"AI unavailable: {exc}"}), 503
+
+# ---------------------------------------------------------------------------
+# Assembly Engine Endpoints
+# ---------------------------------------------------------------------------
+from assembly_engine import assemble_parts, generate_assembly_script
+
+@app.route("/assembly/build", methods=["POST"])
+def build_assembly():
+    """Build assembly from parts list with positions"""
+    data = request.get_json(force=True)
+    parts_list = data.get("parts", [])
+    
+    if not parts_list:
+        return jsonify({"error": "No parts provided"}), 400
+    
+    job_id = _new_job("assembly")
+    
+    def execute():
+        _log(job_id, "assembly", "running", f"Assembling {len(parts_list)} parts...")
+        try:
+            script = generate_assembly_script(parts_list)
+            success, error = execute_cadquery(script, job_id)
+            if success:
+                _log(job_id, "complete", "done", "Assembly generated")
+                jobs[job_id]["assembly_script"] = script
+                jobs[job_id]["step_file"] = os.path.join(TEMP_DIR, f"{job_id}.step")
+                jobs[job_id]["stl_file"] = os.path.join(TEMP_DIR, f"{job_id}.stl")
+            else:
+                _log(job_id, "complete", "error", error)
+        except Exception as e:
+            _log(job_id, "complete", "error", str(e))
+    
+    threading.Thread(target=execute, daemon=True).start()
+    return jsonify({"job_id": job_id})
+
+@app.route("/assembly/script/<job_id>")
+def get_assembly_script(job_id):
+    """Get generated assembly script for editor tab"""
+    job = jobs.get(job_id, {})
+    return jsonify({"script": job.get("assembly_script", "")})
+
 
 # ---------------------------------------------------------------------------
 # Canvas — Block-based assembly endpoints

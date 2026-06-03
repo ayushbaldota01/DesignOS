@@ -11,6 +11,27 @@ import math
 # Block parsing
 # ---------------------------------------------------------------------------
 
+PARAM_SCHEMAS = {
+    "bracket":  ["length", "width", "height", "wall_t", "x", "y", "z"],
+    "l_bracket":["height", "base_length", "width", "thickness", "root_fillet", "x", "y", "z"],
+    "plate":    ["length", "width", "height", "x", "y", "z"],
+    "shaft":    ["diameter", "length", "x", "y", "z"],
+    "housing":  ["length", "width", "height", "wall_t", "x", "y", "z"],
+    "channel":  ["length", "width", "height", "wall_t", "x", "y", "z"],
+    "flange":   ["length", "width", "height", "wall_t", "x", "y", "z"],
+    "gear":     ["diameter", "height", "x", "y", "z"],
+    "i_beam":   ["height", "width", "length", "web_thickness", "flange_thickness", "x", "y", "z"],
+    "two_stage_parallel_shaft": ["d1", "l1", "d2", "l2", "x", "y", "z"],
+    "holes":    ["hole_points", "hole_dia"],
+    "fillets":  ["radius"],
+    "chamfers": ["size"],
+    "pockets":  ["width", "length", "depth", "x", "y"],
+    "boss":     ["diameter", "height", "x", "y"],
+    "shell":    ["wall_t"],
+    "smart_fillet": ["radius"],
+    "flange_holes": ["face_tag", "dia", "clearance"],
+}
+
 BLOCK_PATTERN = re.compile(
     r'# \[BLOCK_(\d+)\] type=(\w+) params=(.+?)(?:\s+parent=(\d+))?(?:\s+face=(\S+))?\n'
     r'([^\n]+)',
@@ -39,26 +60,6 @@ def parse_blocks(script: str) -> list:
 
 def _parse_params(block_type, params_raw):
     """Convert params_raw string into a named dict based on block type."""
-    PARAM_SCHEMAS = {
-        "bracket":  ["length", "width", "height", "wall_t", "x", "y", "z"],
-        "l_bracket":["height", "base_length", "width", "thickness", "root_fillet", "x", "y", "z"],
-        "plate":    ["length", "width", "height", "x", "y", "z"],
-        "shaft":    ["diameter", "length", "x", "y", "z"],
-        "housing":  ["length", "width", "height", "wall_t", "x", "y", "z"],
-        "channel":  ["length", "width", "height", "wall_t", "x", "y", "z"],
-        "flange":   ["length", "width", "height", "wall_t", "x", "y", "z"],
-        "gear":     ["diameter", "height", "x", "y", "z"],
-        "i_beam":   ["height", "width", "length", "web_thickness", "flange_thickness", "x", "y", "z"],
-        "two_stage_parallel_shaft": ["d1", "l1", "d2", "l2", "x", "y", "z"],
-        "holes":    ["hole_points", "hole_dia"],
-        "fillets":  ["radius"],
-        "chamfers": ["size"],
-        "pockets":  ["width", "length", "depth", "x", "y"],
-        "boss":     ["diameter", "height", "x", "y"],
-        "shell":    ["wall_t"],
-        "smart_fillet": ["radius"],
-        "flange_holes": ["face_tag", "dia", "clearance"],
-    }
     schema = PARAM_SCHEMAS.get(block_type, [])
     
     # Try JSON first
@@ -129,14 +130,25 @@ def update_block_param(script: str, block_id: str, param_key: str, new_value: an
 
     # Parse old params, update the key, rebuild
     old_params = target["params"]
-    if param_key not in old_params:
+    
+    # Allow adding x, y, z dynamically for gizmo transforms even if they didn't exist
+    if param_key not in old_params and param_key not in ['x', 'y', 'z', 'rot_x', 'rot_y', 'rot_z']:
         return script
 
     old_params[param_key] = str(new_value)
     
-    # Update the parameter and raw string
-    old_params[param_key] = str(new_value)
-    target["params_raw"] = ",".join(str(v) for v in old_params.values())
+    # Update the raw string based on schema order
+    schema = PARAM_SCHEMAS.get(target["type"], [])
+    ordered_vals = []
+    for k in schema:
+        if k in old_params:
+            ordered_vals.append(str(old_params[k]))
+    
+    # If the block type doesn't have a strict schema match, fallback to just values
+    if not ordered_vals:
+        ordered_vals = [str(v) for v in old_params.values()]
+        
+    target["params_raw"] = ",".join(ordered_vals)
     
     # Rebuild the code line
     parent_var = _resolve_parent_var(blocks, target["parent"])
@@ -160,17 +172,26 @@ def _rebuild_code_line(block_type, params, parent_id, block_id, parent_var="b001
         args = ", ".join(str(v) for v in params.values())
         return f"{parent_var} = FEATURE_MAP['{block_type}']({parent_var}, {args}, face_selector='{face_selector}')"
     else:
-        # Separate base params from x, y, z
+        # Separate base params from x, y, z and rotations
         base_args = []
         x, y, z = 0.0, 0.0, 0.0
+        rx, ry, rz = 0.0, 0.0, 0.0
+        
         for k, v in params.items():
             if k == 'x': x = float(v)
             elif k == 'y': y = float(v)
             elif k == 'z': z = float(v)
+            elif k == 'rot_x': rx = float(v)
+            elif k == 'rot_y': ry = float(v)
+            elif k == 'rot_z': rz = float(v)
             else: base_args.append(str(v))
             
         args_str = ", ".join(base_args)
         code_line = f"b{block_id} = BASE_TEMPLATES['{block_type}']({args_str})"
+        
+        if rx != 0: code_line += f".rotate((0,0,0), (1,0,0), {rx})"
+        if ry != 0: code_line += f".rotate((0,0,0), (0,1,0), {ry})"
+        if rz != 0: code_line += f".rotate((0,0,0), (0,0,1), {rz})"
         
         if x != 0 or y != 0 or z != 0:
             code_line += f".translate(({x}, {y}, {z}))"
@@ -220,8 +241,14 @@ def rebuild_script_from_blocks(blocks: list) -> str:
 
     script_lines.append("if isinstance(result, cq.Assembly):")
     script_lines.append("    result.save(output_path)")
+    script_lines.append("    result.save(stl_output_path, exportType='STL')")
+    script_lines.append("    result.save(glb_output_path)")
     script_lines.append("else:")
     script_lines.append("    cq.exporters.export(result, output_path)")
+    script_lines.append("    cq.exporters.export(result, stl_output_path)")
+    script_lines.append("    temp_assy = cq.Assembly()")
+    script_lines.append("    temp_assy.add(result, name='part_001')")
+    script_lines.append("    temp_assy.save(glb_output_path)")
     
     return "\n".join(script_lines) + "\n"
 

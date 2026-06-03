@@ -1112,3 +1112,55 @@ html, body {
 .sketch-tool-btn:hover { border-color:var(--border-light); color:var(--text-primary); }
 .sketch-tool-btn.active { background:var(--bg-selected); color:#fff; border-color:var(--accent); }
 .sketch-bar-sep { width:1px; height:20px; background:var(--border); margin:0 4px; }
+
+ . a s s e m b l y - p a n e l   {   p a d d i n g :   1 0 p x   1 2 p x ;   } 
+ . a s s e m b l y - p r e s e t - t i t l e   {   f o n t - s i z e :   9 p x ;   c o l o r :   v a r ( - - t e x t - d i m ) ;   l e t t e r - s p a c i n g :   2 p x ;   m a r g i n - b o t t o m :   8 p x ;   } 
+ . p r e s e t - i t e m   {   d i s p l a y :   f l e x ;   a l i g n - i t e m s :   c e n t e r ;   g a p :   8 p x ;   p a d d i n g :   8 p x ;   b o r d e r :   1 p x   s o l i d   v a r ( - - b o r d e r ) ;   m a r g i n - b o t t o m :   6 p x ;   c u r s o r :   p o i n t e r ;   } 
+ . p r e s e t - i t e m : h o v e r   {   b o r d e r - c o l o r :   v a r ( - - a c c e n t ) ;   } 
+ . p r e s e t - i c o n   {   f o n t - s i z e :   1 8 p x ;   } 
+ . p r e s e t - i n f o   {   f l e x :   1 ;   } 
+ . p r e s e t - n a m e   {   f o n t - s i z e :   1 1 p x ;   c o l o r :   v a r ( - - t e x t - p r i m a r y ) ;   } 
+ . p r e s e t - d e s c   {   f o n t - s i z e :   1 0 p x ;   c o l o r :   v a r ( - - t e x t - d i m ) ;   m a r g i n - t o p :   2 p x ;   } 
+ . p r e s e t - b u i l d - b t n   {   b a c k g r o u n d :   v a r ( - - a c c e n t ) ;   b o r d e r :   n o n e ;   c o l o r :   # f f f ;   p a d d i n g :   4 p x   1 0 p x ;   c u r s o r :   p o i n t e r ;   f o n t - s i z e :   1 0 p x ;   f o n t - f a m i l y :   v a r ( - - m o n o ) ;   } 
+ . a s s e m b l y - b u i l d e r   {   m a r g i n - t o p :   1 2 p x ;   b o r d e r - t o p :   1 p x   s o l i d   v a r ( - - b o r d e r ) ;   p a d d i n g - t o p :   1 0 p x ;   } 
+ . a s s e m b l y - p a r t - r o w   {   b a c k g r o u n d :   v a r ( - - b g - p a n e l ) ;   b o r d e r :   1 p x   s o l i d   v a r ( - - b o r d e r ) ;   p a d d i n g :   8 p x ;   m a r g i n - b o t t o m :   6 p x ;   } 
+ . p a r t - p o s - r o w   {   d i s p l a y :   f l e x ;   a l i g n - i t e m s :   c e n t e r ;   g a p :   4 p x ;   m a r g i n - t o p :   6 p x ;   f l e x - w r a p :   w r a p ;   } 
+ . b t n - a d d - p a r t   {   w i d t h :   1 0 0 % ;   b a c k g r o u n d :   t r a n s p a r e n t ;   b o r d e r :   1 p x   d a s h e d   v a r ( - - b o r d e r - l i g h t ) ;   c o l o r :   v a r ( - - t e x t - d i m ) ;   p a d d i n g :   6 p x ;   c u r s o r :   p o i n t e r ;   f o n t - s i z e :   1 1 p x ;   f o n t - f a m i l y :   v a r ( - - m o n o ) ;   m a r g i n - b o t t o m :   6 p x ;   } 
+ . b t n - a d d - p a r t : h o v e r   {   b o r d e r - c o l o r :   v a r ( - - a c c e n t ) ;   c o l o r :   v a r ( - - a c c e n t ) ;   } 
+ . b t n - b u i l d - a s s e m b l y   {   w i d t h :   1 0 0 % ;   b a c k g r o u n d :   v a r ( - - a c c e n t ) ;   b o r d e r :   n o n e ;   c o l o r :   # f f f ;   p a d d i n g :   7 p x ;   c u r s o r :   p o i n t e r ;   f o n t - f a m i l y :   v a r ( - - m o n o ) ;   f o n t - s i z e :   1 1 p x ;   f o n t - w e i g h t :   6 0 0 ;   } 
+ . b t n - b u i l d - a s s e m b l y : h o v e r   {   b a c k g r o u n d :   v a r ( - - a c c e n t - h o v e r ) ;   }  
+ 
+.gizmo-toolbar {
+  position: absolute;
+  top: 20px;
+  right: 140px;
+  display: flex;
+  gap: 8px;
+  background: var(--bg-toolbar);
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+  z-index: 100;
+}
+.gizmo-btn {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: all 0.1s;
+}
+.gizmo-btn:hover { background: var(--bg-hover); }
+.gizmo-btn.active {
+  background: var(--accent);
+  border-color: var(--accent-hover);
+  color: #fff;
+}
+
+.assembly-part-row { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; background: var(--bg-hover); padding: 8px; position: relative; border-left: 2px solid transparent; cursor: pointer; transition: all 0.15s ease; } .assembly-part-row:hover { background: rgba(255, 255, 255, 0.05); } .assembly-part-row.selected { border-left-color: var(--accent); background: rgba(0, 120, 212, 0.1); } .part-pos-row { display: flex; align-items: center; gap: 4px; margin-top: 4px; }

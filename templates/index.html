@@ -366,6 +366,14 @@
           <div class="gen-spinner"></div>
           <span class="gen-text">Generating...</span>
         </div>
+
+        <!-- Gizmo controls -->
+        <div class="gizmo-controls" style="position: absolute; bottom: 20px; left: 20px; z-index: 100; display: flex; gap: 8px; background: var(--bg-secondary); padding: 8px; border-radius: 6px; border: 1px solid var(--border);">
+            <div style="font-size: 11px; color: var(--text-secondary); align-self: center; margin-right: 8px;">GIZMO</div>
+            <button class="tool-btn" onclick="toggleGizmo('translate')" style="font-size: 11px; padding: 4px 8px;">☩ Translate</button>
+            <button class="tool-btn" onclick="toggleGizmo('rotate')" style="font-size: 11px; padding: 4px 8px;">↻ Rotate</button>
+            <button class="tool-btn" onclick="disableGizmo()" style="font-size: 11px; padding: 4px 8px;">✕ Off</button>
+        </div>
       </div>
 
       <!-- Chat panel -->
@@ -395,6 +403,23 @@
 
     <!-- Right: Assembly Tree + Properties -->
     <div class="right-panel">
+      <!-- ASSEMBLY SECTION -->
+      <div class="right-panel-section">
+        <div class="right-panel-section-header" onclick="this.parentElement.querySelector('.assembly-panel').classList.toggle('hidden')">
+          <span>ASSEMBLY</span><span>▾</span>
+        </div>
+        <div class="assembly-panel" id="section-assembly">
+
+          <!-- Custom assembly builder -->
+          <div class="assembly-builder">
+              <div class="assembly-preset-title">CUSTOM</div>
+              <div id="assemblyPartsList"></div>
+              <button onclick="addAssemblyPart()" class="btn-add-part">+ Add Part</button>
+              <button onclick="buildCustomAssembly()" class="btn-build-assembly">Build Assembly</button>
+          </div>
+        </div>
+      </div>
+
       <div class="right-panel-section">
         <div class="right-panel-section-header" onclick="this.parentElement.querySelector('.assembly-tree').classList.toggle('hidden')">
           ASSEMBLY TREE ▾
@@ -541,12 +566,12 @@
 <!-- ═══════════════════════════════════════════════════════════════
      SCRIPTS
      ═══════════════════════════════════════════════════════════════ -->
-<script src="/static/canvas.js"></script>
-<script src="/static/editor.js"></script>
-<script src="/static/manual_sketch.js"></script>
+<script src="/static/canvas.js?v=6"></script>
+<script src="/static/editor.js?v=6"></script>
+<script src="/static/manual_sketch.js?v=6"></script>
 
 <script type="module">
-  import { CADViewer } from '/static/viewer.js';
+  import { CADViewer } from '/static/viewer.js?v=6';
 
   // Initialize viewer in the prompt tab viewport
   const viewer = new CADViewer('viewerCanvas');

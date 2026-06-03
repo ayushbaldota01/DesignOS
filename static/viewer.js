@@ -6,6 +6,8 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { STLLoader } from "three/addons/loaders/STLLoader.js";
+import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+import { TransformControls } from "three/addons/controls/TransformControls.js";
 
 const COLORS = {
   background: 0x141414,
@@ -25,9 +27,16 @@ export class CADViewer {
     this.selectedFace = null;
     this.onFaceSelect = null;   // callback(faceInfo) or null
     this.onMouseMove3D = null;  // callback({x,y,z})
+    this.onTransformEnd = null; // callback({meshName, position, rotation})
     this._groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
     this._raycaster = new THREE.Raycaster();
     this._mouse = new THREE.Vector2();
+    
+    // Gizmo properties
+    this.transformControls = null;
+    this.gizmoEnabled = false;
+    this.gizmoMode = "translate"; // translate, rotate
+
     this._init();
   }
 
@@ -69,6 +78,21 @@ export class CADViewer {
     this.controls.dampingFactor = 0.08;
     this.controls.minDistance = 5;
     this.controls.maxDistance = 10000;
+
+    // TransformControls (Gizmo)
+    this.transformControls = new TransformControls(this.camera, this.renderer.domElement);
+    this.transformControls.addEventListener('dragging-changed', (event) => {
+        this.controls.enabled = !event.value;
+        if (!event.value && this.onTransformEnd && this.transformControls.object) {
+            const obj = this.transformControls.object;
+            this.onTransformEnd({
+                meshName: obj.name,
+                position: obj.position.clone(),
+                rotation: obj.rotation.clone()
+            });
+        }
+    });
+    this.scene.add(this.transformControls);
 
     // Lights
     this.scene.add(new THREE.AmbientLight(COLORS.ambient, 0.5));
@@ -135,6 +159,89 @@ export class CADViewer {
   }
 
   /* ─── Public API ─── */
+
+  setGizmoEnabled(enabled) {
+      this.gizmoEnabled = enabled;
+      if (!enabled) {
+          this.transformControls.detach();
+      }
+  }
+
+  setGizmoMode(mode) {
+      this.gizmoMode = mode;
+      this.transformControls.setMode(mode);
+  }
+
+  attachGizmoToPart(partName) {
+      if (!this.currentModel) return;
+      
+      // If null is passed, detach
+      if (!partName) {
+          this.transformControls.detach();
+          return;
+      }
+
+      let targetObj = null;
+      this.currentModel.traverse((child) => {
+          if (child.name === partName) {
+              targetObj = child;
+          }
+      });
+
+      if (targetObj) {
+          this.gizmoEnabled = true;
+          this.transformControls.attach(targetObj);
+      } else {
+          this.transformControls.detach();
+      }
+  }
+
+  loadGLTF(url, preserveCamera = false) {
+      const attachedPartName = this.transformControls.object ? this.transformControls.object.name : null;
+      this.clear();
+      const loader = new GLTFLoader();
+      loader.load(url, (gltf) => {
+          const model = gltf.scene;
+          
+          const material = new THREE.MeshStandardMaterial({
+              color: COLORS.partBase,
+              metalness: 0.3,
+              roughness: 0.5,
+              emissive: COLORS.partEmissive,
+              emissiveIntensity: 0.15,
+              flatShading: false,
+          });
+
+          // Compute bounding box to center camera
+          const box = new THREE.Box3().setFromObject(model);
+          const size = new THREE.Vector3();
+          box.getSize(size);
+          const maxDim = Math.max(size.x, size.y, size.z) || 100;
+          
+          model.traverse((child) => {
+              if (child.isMesh) {
+                  child.material = material;
+                  child.castShadow = true;
+                  child.receiveShadow = true;
+              }
+          });
+
+          this.currentModel = model;
+          this.scene.add(model);
+
+          if (!preserveCamera) {
+              const dist = maxDim * 2.0;
+              this.camera.position.set(dist, dist * 0.8, dist);
+              this.controls.target.copy(box.getCenter(new THREE.Vector3()));
+              this.controls.update();
+          }
+
+          if (attachedPartName && this.gizmoEnabled) {
+              this.attachGizmoToPart(attachedPartName);
+          }
+
+      }, undefined, (err) => console.error("GLTF load error:", err));
+  }
 
   loadSTL(url) {
     if (this.currentModel) {
@@ -251,10 +358,19 @@ export class CADViewer {
     this._mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
 
     this._raycaster.setFromCamera(this._mouse, this.camera);
-    const intersects = this._raycaster.intersectObject(this.currentModel, true);
+    
+    // Check intersection with the model
+    let intersects = [];
+    if (this.currentModel.isGroup) {
+        intersects = this._raycaster.intersectObjects(this.currentModel.children, true);
+    } else {
+        intersects = this._raycaster.intersectObject(this.currentModel, false);
+    }
 
     if (intersects.length > 0) {
-      const hit = intersects[0];
+      const isect = intersects[0];
+      
+      const hit = isect;
       const normal = hit.face.normal.clone().transformDirection(hit.object.matrixWorld).normalize();
 
       this.clearFaceSelection();
