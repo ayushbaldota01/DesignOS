@@ -259,17 +259,22 @@ export class CADViewer {
 
       this.clearFaceSelection();
 
-      // Create face highlight — a slightly enlarged translucent copy
-      const highlightGeo = this.currentModel.geometry.clone();
+      // Extract only the triangles belonging to the clicked face
+      const highlightGeo = this._extractFaceGeometry(hit.object, hit.face, hit.point);
       const highlightMat = new THREE.MeshBasicMaterial({
         color: COLORS.faceHighlight,
         transparent: true,
-        opacity: 0.25,
+        opacity: 0.6,
         side: THREE.DoubleSide,
         depthTest: true,
+        polygonOffset: true,
+        polygonOffsetFactor: -1,
+        polygonOffsetUnits: -1
       });
       this.faceHighlight = new THREE.Mesh(highlightGeo, highlightMat);
-      this.faceHighlight.position.copy(this.currentModel.position);
+      this.faceHighlight.position.copy(hit.object.position);
+      this.faceHighlight.rotation.copy(hit.object.rotation);
+      this.faceHighlight.scale.copy(hit.object.scale);
       this.scene.add(this.faceHighlight);
 
       const selector = this._getFaceSelector(normal);
@@ -340,5 +345,45 @@ export class CADViewer {
     if (n.x > 0.8) return 'RIGHT FACE';
     if (n.x < -0.8) return 'LEFT FACE';
     return 'TOP FACE';
+  }
+
+  _extractFaceGeometry(mesh, hitFace, hitPoint) {
+    const geo = mesh.geometry;
+    const pos = geo.attributes.position.array;
+    
+    const targetNormal = hitFace.normal;
+    const localPt = mesh.worldToLocal(hitPoint.clone());
+    
+    const newPos = [];
+    const vA = new THREE.Vector3();
+    const vB = new THREE.Vector3();
+    const vC = new THREE.Vector3();
+    const cb = new THREE.Vector3();
+    const ab = new THREE.Vector3();
+    const triNorm = new THREE.Vector3();
+    
+    // STLLoader produces non-indexed geometry
+    const count = pos.length / 9;
+    for (let i = 0; i < count; i++) {
+      vA.fromArray(pos, i * 9);
+      vB.fromArray(pos, i * 9 + 3);
+      vC.fromArray(pos, i * 9 + 6);
+      
+      cb.subVectors(vC, vB);
+      ab.subVectors(vA, vB);
+      triNorm.crossVectors(cb, ab).normalize();
+      
+      if (triNorm.dot(targetNormal) > 0.99) {
+        const dist = Math.abs(triNorm.dot(vA.clone().sub(localPt)));
+        if (dist < 0.1) {
+          newPos.push(vA.x, vA.y, vA.z, vB.x, vB.y, vB.z, vC.x, vC.y, vC.z);
+        }
+      }
+    }
+    
+    const hGeo = new THREE.BufferGeometry();
+    hGeo.setAttribute('position', new THREE.Float32BufferAttribute(newPos, 3));
+    hGeo.computeVertexNormals();
+    return hGeo;
   }
 }
