@@ -543,17 +543,10 @@ window.faceOp = function(opType) {
     return;
   }
   if (opType === 'edit2d') {
-    // Switch to Manual tab with face context loaded
-    switchTab('manual');
-    
-    // Set 2D sketch mode for selected face
-    const faceSelector = window.clickedFaceSelector || '>Z';
-    const blockId = canvas.selectedBlockId;
-    
-    // Show 2D canvas with face outline
-    initSketchForFace(faceSelector, blockId);
-    
-    showToast(`Editing ${window.clickedFaceLabel || 'face'} in 2D sketch mode`);
+    if (!canvas.sessionId) { showToast('Generate a part first'); return; }
+    if (!canvas.selectedFace && !window.clickedFaceSelector) { showToast('Select a face first'); return; }
+    document.getElementById('faceOpsBar').classList.remove('visible');
+    openSketch2d();
     return;
   }
   if (!canvas.sessionId) { showToast('Generate a part first'); return; }
@@ -907,30 +900,36 @@ window.openSketch2d = function() {
   const overlay = document.getElementById('sketch2dOverlay');
   if (!overlay) return;
   
-  // Set face title
-  const faceStr = canvas.selectedFace ? canvas.selectedFace.selector : '>Z';
-  document.getElementById('sketch2dTitleText').textContent = `2D Face Sketcher - Face ${faceStr}`;
+  // Resolve face selector — use canvas.selectedFace first, fall back to globals
+  const faceStr = (canvas.selectedFace && canvas.selectedFace.selector)
+    ? canvas.selectedFace.selector
+    : (window.clickedFaceSelector || '>Y');
+  const faceLabel = (canvas.selectedFace && canvas.selectedFace.label)
+    ? canvas.selectedFace.label
+    : (window.clickedFaceLabel || 'TOP FACE');
   
-  // Determine dimensions
+  document.getElementById('sketch2dTitleText').textContent = `2D Face Sketcher — ${faceLabel} (${faceStr})`;
+  
+  // Determine dimensions from the selected block
   const rootBlock = canvas.blocks.find(b => b.id === (canvas.selectedBlockId || '001')) || canvas.blocks[0];
   s2dState.faceWidth = 100;
   s2dState.faceHeight = 100;
   if (rootBlock && rootBlock.params) {
     const p = rootBlock.params;
     if (faceStr.includes('Y')) { // TOP / BOTTOM FACE
-      // X axis is length, Z axis is width
       s2dState.faceWidth = parseFloat(p.length || p.base_length || p.diameter || 100);
       s2dState.faceHeight = parseFloat(p.width || p.diameter || 60);
     } else if (faceStr.includes('Z')) { // FRONT / BACK FACE
-      // X axis is length, Y axis is height (thickness)
       s2dState.faceWidth = parseFloat(p.length || p.base_length || p.diameter || 100);
       s2dState.faceHeight = parseFloat(p.height || p.thickness || p.diameter || 20);
     } else if (faceStr.includes('X')) { // LEFT / RIGHT FACE
-      // Z axis is width, Y axis is height (thickness)
       s2dState.faceWidth = parseFloat(p.width || p.diameter || 60);
       s2dState.faceHeight = parseFloat(p.height || p.thickness || p.diameter || 20);
     }
   }
+  
+  // Store resolved face selector for applySketch2d
+  s2dState.faceSelector = faceStr;
   
   s2dState.elements = [];
   s2dState.selectedId = null;
@@ -1198,20 +1197,12 @@ window.updateSketch2dElem = function(key, val) {
   }
 };
 
-window.applyOp = async function(featureType) {
-  const op = document.getElementById('opPanel');
-  if (!op.classList.contains('visible')) return;
-
-  const faceSelector = canvas.selectedFace ? canvas.selectedFace.selector : '>Y';
-  const parentId = canvas.selectedBlockId || '001';
-  
-  closeSketch2d();
-  document.getElementById('faceOpsBar').classList.remove('visible');
-};
+// applyOp is defined at line ~210 — this block intentionally left empty
+// to avoid overwriting the real applyOp function.
 
 window.applySketch2d = async function() {
   if (s2dState.elements.length === 0) { closeSketch2d(); return; }
-  const faceSelector = canvas.selectedFace ? canvas.selectedFace.selector : '>Y';
+  const faceSelector = s2dState.faceSelector || (canvas.selectedFace ? canvas.selectedFace.selector : '>Y');
   const parentId = canvas.selectedBlockId || '001';
   
   closeSketch2d();
