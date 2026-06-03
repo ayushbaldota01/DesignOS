@@ -1213,19 +1213,46 @@ window.applySketch2d = async function() {
     for (const elem of s2dState.elements) {
       let blockType = '';
       let params = {};
+      // Map 2D sketch coordinates (x: right, y: up) to CadQuery's Workplane local axes
+      let cqX = elem.x;
+      let cqY = elem.y;
       
+      if (faceSelector === '>X') {
+        cqX = elem.y;
+        cqY = -elem.x;
+      } else if (faceSelector === '<X') {
+        cqX = -elem.y;
+        cqY = elem.x;
+      } else if (faceSelector === '>Y') {
+        cqX = -elem.x;
+        cqY = -elem.y;
+      } else if (faceSelector === '<Y') {
+        cqX = elem.x;
+        cqY = elem.y;
+      } else if (faceSelector === '<Z') {
+        cqX = -elem.x;
+        cqY = -elem.y;
+      }
+      // >Z already matches (cqX = x, cqY = y)
+
       if (elem.opType === 'hole') {
         blockType = 'holes';
-        params = { hole_points: `[[${elem.x},${elem.y}]]`, hole_dia: elem.dia };
+        params = { hole_points: `[[${cqX},${cqY}]]`, hole_dia: elem.dia };
       } else if (elem.opType === 'pocket') {
         blockType = 'pockets';
-        params = { width: elem.w, length: elem.h, depth: elem.depth, x: elem.x, y: elem.y };
+        let cqW = elem.w;
+        let cqH = elem.h;
+        if (faceSelector === '>X' || faceSelector === '<X') {
+          cqW = elem.h;
+          cqH = elem.w;
+        }
+        params = { width: cqW, length: cqH, depth: elem.depth, x: cqX, y: cqY };
       } else if (elem.opType === 'boss') {
         blockType = 'boss';
-        params = { diameter: elem.dia, height: elem.depth, x: elem.x, y: elem.y };
+        params = { diameter: elem.dia, height: elem.depth, x: cqX, y: cqY };
       }
       
-      addChatMsg('op', `Applying ${blockType} at x:${elem.x}, y:${elem.y}`);
+      addChatMsg('op', `Applying ${blockType} at mapped coords x:${cqX}, y:${cqY} (from 2D ${elem.x},${elem.y})`);
       
       const res = await fetch('/canvas/add-block', {
         method: 'POST',

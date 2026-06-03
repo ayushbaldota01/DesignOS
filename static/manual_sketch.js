@@ -120,13 +120,13 @@ function drawElements() {
         
         if (el.type === 'line') {
             ctx.beginPath();
-            ctx.moveTo(mmToPx(el.x1), mmToPx(el.y1));
-            ctx.lineTo(mmToPx(el.x2), mmToPx(el.y2));
+            ctx.moveTo(mmToPxX(el.x1), mmToPxY(el.y1));
+            ctx.lineTo(mmToPxX(el.x2), mmToPxY(el.y2));
             ctx.stroke();
             
             // Dimension label
-            const mx = (mmToPx(el.x1) + mmToPx(el.x2)) / 2;
-            const my = (mmToPx(el.y1) + mmToPx(el.y2)) / 2;
+            const mx = (mmToPxX(el.x1) + mmToPxX(el.x2)) / 2;
+            const my = (mmToPxY(el.y1) + mmToPxY(el.y2)) / 2;
             const len = Math.sqrt((el.x2-el.x1)**2 + (el.y2-el.y1)**2).toFixed(1);
             ctx.fillStyle = '#666';
             ctx.font = '9px Consolas';
@@ -134,25 +134,28 @@ function drawElements() {
             
         } else if (el.type === 'circle') {
             ctx.beginPath();
-            ctx.arc(mmToPx(el.cx), mmToPx(el.cy), el.r * sketch.scale, 0, Math.PI*2);
+            ctx.arc(mmToPxX(el.cx), mmToPxY(el.cy), el.r * sketch.scale, 0, Math.PI*2);
             ctx.stroke();
             
             // Center cross
             ctx.strokeStyle = '#444';
             ctx.lineWidth = 0.5;
-            const cx = mmToPx(el.cx), cy = mmToPx(el.cy), cs = 6;
+            const cx = mmToPxX(el.cx), cy = mmToPxY(el.cy), cs = 6;
             ctx.beginPath(); ctx.moveTo(cx-cs,cy); ctx.lineTo(cx+cs,cy); ctx.stroke();
             ctx.beginPath(); ctx.moveTo(cx,cy-cs); ctx.lineTo(cx,cy+cs); ctx.stroke();
             
             ctx.fillStyle = '#666';
             ctx.font = '9px Consolas';
-            ctx.fillText(`⌀${(el.r*2).toFixed(1)}mm`, mmToPx(el.cx)+el.r*sketch.scale+4, mmToPx(el.cy));
+            ctx.fillText(`⌀${(el.r*2).toFixed(1)}mm`, mmToPxX(el.cx)+el.r*sketch.scale+4, mmToPxY(el.cy));
             
         } else if (el.type === 'rect') {
-            ctx.strokeRect(mmToPx(el.x), mmToPx(el.y), el.w*sketch.scale, el.h*sketch.scale);
+            // Need to adjust Y for rect because canvas fillRect uses top-left, but our Y is inverted
+            // If el.y is the top in math coords, it's the top in canvas coords too, but wait...
+            // el.h is height. The top-left in canvas is mmToPxX(el.x), mmToPxY(el.y)
+            ctx.strokeRect(mmToPxX(el.x), mmToPxY(el.y), el.w*sketch.scale, el.h*sketch.scale);
             ctx.fillStyle = '#666';
             ctx.font = '9px Consolas';
-            ctx.fillText(`${el.w}×${el.h}mm`, mmToPx(el.x)+4, mmToPx(el.y)-4);
+            ctx.fillText(`${el.w}×${el.h}mm`, mmToPxX(el.x)+4, mmToPxY(el.y)-4);
         }
     });
 }
@@ -163,8 +166,10 @@ function drawDimensions() {
 }
 
 // Coordinate conversions
-function mmToPx(mm) { return sketch.offsetX + mm * sketch.scale; }
-function pxToMm(px) { return (px - sketch.offsetX) / sketch.scale; }
+function mmToPxX(mm) { return sketch.offsetX + mm * sketch.scale; }
+function mmToPxY(mm) { return sketch.offsetY - mm * sketch.scale; } // Invert Y: CadQuery +Y is UP
+function pxToMmX(px) { return (px - sketch.offsetX) / sketch.scale; }
+function pxToMmY(px) { return (sketch.offsetY - px) / sketch.scale; } // Invert Y
 function snapToGrid(mm) { return Math.round(mm / sketch.snapGrid) * sketch.snapGrid; }
 
 // Mouse events
@@ -172,8 +177,8 @@ function onSketchMouseDown(e) {
     const rect = sketch.canvas.getBoundingClientRect();
     const px = e.clientX - rect.left;
     const py = e.clientY - rect.top;
-    const mx = snapToGrid(pxToMm(px));
-    const my = snapToGrid(pxToMm(py));
+    const mx = snapToGrid(pxToMmX(px));
+    const my = snapToGrid(pxToMmY(py));
     
     sketch.drawing = true;
     sketch.startX = mx;
@@ -185,8 +190,8 @@ function onSketchMouseMove(e) {
     const rect = sketch.canvas.getBoundingClientRect();
     const px = e.clientX - rect.left;
     const py = e.clientY - rect.top;
-    const mx = snapToGrid(pxToMm(px));
-    const my = snapToGrid(pxToMm(py));
+    const mx = snapToGrid(pxToMmX(px));
+    const my = snapToGrid(pxToMmY(py));
     
     // Update cursor coords in status bar
     document.getElementById('coords').textContent = 
@@ -204,17 +209,17 @@ function onSketchMouseMove(e) {
     
     if (sketch.tool === 'line') {
         ctx.beginPath();
-        ctx.moveTo(mmToPx(sketch.startX), mmToPx(sketch.startY));
+        ctx.moveTo(mmToPxX(sketch.startX), mmToPxY(sketch.startY));
         ctx.lineTo(px, py);
         ctx.stroke();
     } else if (sketch.tool === 'circle') {
         const r = Math.sqrt((mx-sketch.startX)**2 + (my-sketch.startY)**2);
         ctx.beginPath();
-        ctx.arc(mmToPx(sketch.startX), mmToPx(sketch.startY), r*sketch.scale, 0, Math.PI*2);
+        ctx.arc(mmToPxX(sketch.startX), mmToPxY(sketch.startY), r*sketch.scale, 0, Math.PI*2);
         ctx.stroke();
     } else if (sketch.tool === 'rectangle') {
-        ctx.strokeRect(mmToPx(sketch.startX), mmToPx(sketch.startY), 
-                      (mx-sketch.startX)*sketch.scale, (my-sketch.startY)*sketch.scale);
+        ctx.strokeRect(mmToPxX(sketch.startX), mmToPxY(sketch.startY), 
+                      (mx-sketch.startX)*sketch.scale, -(my-sketch.startY)*sketch.scale);
     }
     
     ctx.setLineDash([]);
@@ -227,8 +232,8 @@ function onSketchMouseUp(e) {
     const rect = sketch.canvas.getBoundingClientRect();
     const px = e.clientX - rect.left;
     const py = e.clientY - rect.top;
-    const mx = snapToGrid(pxToMm(px));
-    const my = snapToGrid(pxToMm(py));
+    const mx = snapToGrid(pxToMmX(px));
+    const my = snapToGrid(pxToMmY(py));
     
     if (Math.abs(mx - sketch.startX) < 1 && Math.abs(my - sketch.startY) < 1) return;
     
