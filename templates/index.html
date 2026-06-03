@@ -378,6 +378,16 @@
         </div>
       </div>
 
+      <div class="right-panel-section">
+        <div class="right-panel-section-header" onclick="this.parentElement.querySelector('.mates-list').classList.toggle('hidden')">
+          ASSEMBLY MATES ▾
+        </div>
+        <div class="mates-list" id="matesList">
+          <div style="padding:12px;color:var(--text-dim);font-size:11px;">No mates defined</div>
+        </div>
+        <button class="btn-app" style="margin: 8px; width: calc(100% - 16px);" onclick="showMateDialog()">+ Add Mate</button>
+      </div>
+
       <div class="right-panel-section" style="flex:1;display:flex;flex-direction:column;">
         <div class="right-panel-section-header">PROPERTIES</div>
         <div class="props-body" id="propsBody">
@@ -507,6 +517,7 @@
      ═══════════════════════════════════════════════════════════════ -->
 <script src="/static/canvas.js"></script>
 <script src="/static/editor.js"></script>
+<script src="/static/manual_sketch.js"></script>
 
 <script type="module">
   import { CADViewer } from '/static/viewer.js';
@@ -548,10 +559,19 @@
 
   // ─── Manual tool handler (Tab 1) ───
   function manualTool(tool) {
-    showToast(`${tool.charAt(0).toUpperCase() + tool.slice(1)} — Feature coming in next version`);
-    // Highlight selected tool
-    document.querySelectorAll('.sketch-tool').forEach(t => t.classList.remove('active'));
-    event.currentTarget.classList.add('active');
+    if (window.manualToolImpl) {
+      window.manualToolImpl(tool);
+    } else {
+      showToast(`${tool.charAt(0).toUpperCase() + tool.slice(1)} — Feature coming in next version`);
+    }
+    
+    // Only highlight if it's a sketch tool
+    if (['select', 'line', 'circle', 'rectangle'].includes(tool)) {
+      document.querySelectorAll('.sketch-tool').forEach(t => t.classList.remove('active'));
+      if (event && event.currentTarget) {
+        event.currentTarget.classList.add('active');
+      }
+    }
   }
 
   // ─── Toast helper (accessible globally) ───

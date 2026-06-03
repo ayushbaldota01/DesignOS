@@ -321,20 +321,24 @@ export class CADViewer {
   }
 
   _getFaceSelector(n) {
+    // n is the normal in Three.js world space, which perfectly matches CadQuery export space.
+    if (n.y > 0.8) return '>Y';
+    if (n.y < -0.8) return '<Y';
     if (n.z > 0.8) return '>Z';
     if (n.z < -0.8) return '<Z';
     if (n.x > 0.8) return '>X';
     if (n.x < -0.8) return '<X';
-    if (n.y > 0.8) return '>Y';
-    return '<Y';
+    return '>Y';
   }
 
   _getFaceLabel(n) {
-    if (n.z > 0.8) return 'TOP FACE';
-    if (n.z < -0.8) return 'BOTTOM FACE';
+    // In Three.js, Y is Up, Z is Forward (towards camera), X is Right.
+    if (n.y > 0.8) return 'TOP FACE';
+    if (n.y < -0.8) return 'BOTTOM FACE';
+    if (n.z > 0.8) return 'FRONT FACE';
+    if (n.z < -0.8) return 'BACK FACE';
     if (n.x > 0.8) return 'RIGHT FACE';
     if (n.x < -0.8) return 'LEFT FACE';
-    if (n.y > 0.8) return 'FRONT FACE';
-    return 'BACK FACE';
+    return 'TOP FACE';
   }
 }

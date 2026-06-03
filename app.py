@@ -322,7 +322,10 @@ def assemble_script(form_data: dict, params: dict) -> str:
             lines.append(f"result = FEATURE_MAP['fillets'](result, {fillet_r})")
 
     lines.append("")
-    lines.append("cq.exporters.export(result, output_path)")
+    lines.append("if isinstance(result, cq.Assembly):")
+    lines.append("    result.save(output_path)")
+    lines.append("else:")
+    lines.append("    cq.exporters.export(result, output_path)")
     
     return "\n".join(lines)
 
@@ -371,12 +374,18 @@ if _designos_export_target is None:
 if _designos_export_target is not None:
     try:
         if not _os.path.exists(output_path):
-            _cq.exporters.export(_designos_export_target, output_path)
+            if isinstance(_designos_export_target, _cq.Assembly):
+                _designos_export_target.save(output_path)
+            else:
+                _cq.exporters.export(_designos_export_target, output_path)
     except Exception:
         pass
     try:
         if not _os.path.exists(stl_output_path):
-            _cq.exporters.export(_designos_export_target, stl_output_path, exportType=_cq.exporters.ExportTypes.STL)
+            if isinstance(_designos_export_target, _cq.Assembly):
+                _designos_export_target.save(stl_output_path, exportType='STL')
+            else:
+                _cq.exporters.export(_designos_export_target, stl_output_path, exportType=_cq.exporters.ExportTypes.STL)
     except Exception:
         pass
 '''
@@ -637,6 +646,21 @@ def execute_raw_script():
 @app.route("/status/<job_id>")
 def status(job_id):
     if job_id not in jobs:
+        # Fallback to check if generated files exist in TEMP_DIR
+        step_path = os.path.join(TEMP_DIR, f"{job_id}.step")
+        stl_path = os.path.join(TEMP_DIR, f"{job_id}.stl")
+        if os.path.exists(step_path) or os.path.exists(stl_path):
+            return jsonify({
+                "status": "completed",
+                "step": "done",
+                "attempt": 1,
+                "max_attempts": 3,
+                "log": [{"step": "complete", "stage": "complete", "status": "done", "message": "Model restored from cache", "ts": time.time()}],
+                "has_step_file": os.path.exists(step_path),
+                "has_stl_file": os.path.exists(stl_path),
+                "error": None,
+                "script": ""
+            })
         return jsonify({"error": "Job not found"}), 404
     j = jobs[job_id]
     return jsonify({
@@ -682,10 +706,18 @@ def stream_job(job_id):
 
 @app.route("/download/<job_id>")
 def download(job_id):
-    if job_id not in jobs or not jobs[job_id].get("step_file"):
+    step_file = None
+    if job_id in jobs and jobs[job_id].get("step_file"):
+        step_file = jobs[job_id]["step_file"]
+    else:
+        path = os.path.join(TEMP_DIR, f"{job_id}.step")
+        if os.path.exists(path):
+            step_file = path
+
+    if not step_file:
         return jsonify({"error": "File not found"}), 404
     return send_file(
-        jobs[job_id]["step_file"],
+        step_file,
         as_attachment=True,
         download_name=f"design_{job_id}.step",
     )
@@ -693,9 +725,17 @@ def download(job_id):
 
 @app.route("/model/<job_id>")
 def model_stl(job_id):
-    if job_id not in jobs or not jobs[job_id].get("stl_file"):
+    stl_file = None
+    if job_id in jobs and jobs[job_id].get("stl_file"):
+        stl_file = jobs[job_id]["stl_file"]
+    else:
+        path = os.path.join(TEMP_DIR, f"{job_id}.stl")
+        if os.path.exists(path):
+            stl_file = path
+
+    if not stl_file:
         return jsonify({"error": "STL not found"}), 404
-    return send_file(jobs[job_id]["stl_file"], mimetype="application/octet-stream")
+    return send_file(stl_file, mimetype="application/octet-stream")
 
 
 @app.route("/health")
@@ -939,7 +979,7 @@ def canvas_add_block():
     block_type = data["block_type"]
     params = data.get("params", {})
     parent_id = data.get("parent_id", "001")
-    face_selector = data.get("face", ">Z")
+    face_selector = data.get("face", ">Y")
 
     session = canvas_sessions.get(session_id)
     if not session:

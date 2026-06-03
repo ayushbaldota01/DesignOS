@@ -432,7 +432,7 @@ window.quickAddFeature = async function(featureType) {
   if (!defaults) return;
 
   const parentId = canvas.selectedBlockId || '001';
-  const face = canvas.selectedFace?.selector || '>Z';
+  const face = canvas.selectedFace?.selector || '>Y';
 
   showGenOverlay(`Adding ${featureType}...`);
   addChatMsg('op', `Adding ${featureType} to b${parentId}...`);
@@ -909,15 +909,18 @@ window.openSketch2d = function() {
   s2dState.faceHeight = 100;
   if (rootBlock && rootBlock.params) {
     const p = rootBlock.params;
-    if (faceStr.includes('Z')) {
-      s2dState.faceWidth = parseFloat(p.length || p.diameter || 100);
+    if (faceStr.includes('Y')) { // TOP / BOTTOM FACE
+      // X axis is length, Z axis is width
+      s2dState.faceWidth = parseFloat(p.length || p.base_length || p.diameter || 100);
       s2dState.faceHeight = parseFloat(p.width || p.diameter || 60);
-    } else if (faceStr.includes('Y')) {
-      s2dState.faceWidth = parseFloat(p.length || p.diameter || 100);
-      s2dState.faceHeight = parseFloat(p.height || p.diameter || 20);
-    } else if (faceStr.includes('X')) {
+    } else if (faceStr.includes('Z')) { // FRONT / BACK FACE
+      // X axis is length, Y axis is height (thickness)
+      s2dState.faceWidth = parseFloat(p.length || p.base_length || p.diameter || 100);
+      s2dState.faceHeight = parseFloat(p.height || p.thickness || p.diameter || 20);
+    } else if (faceStr.includes('X')) { // LEFT / RIGHT FACE
+      // Z axis is width, Y axis is height (thickness)
       s2dState.faceWidth = parseFloat(p.width || p.diameter || 60);
-      s2dState.faceHeight = parseFloat(p.height || p.diameter || 20);
+      s2dState.faceHeight = parseFloat(p.height || p.thickness || p.diameter || 20);
     }
   }
   
@@ -1187,9 +1190,20 @@ window.updateSketch2dElem = function(key, val) {
   }
 };
 
+window.applyOp = async function(featureType) {
+  const op = document.getElementById('opPanel');
+  if (!op.classList.contains('visible')) return;
+
+  const faceSelector = canvas.selectedFace ? canvas.selectedFace.selector : '>Y';
+  const parentId = canvas.selectedBlockId || '001';
+  
+  closeSketch2d();
+  document.getElementById('faceOpsBar').classList.remove('visible');
+};
+
 window.applySketch2d = async function() {
   if (s2dState.elements.length === 0) { closeSketch2d(); return; }
-  const faceSelector = canvas.selectedFace ? canvas.selectedFace.selector : '>Z';
+  const faceSelector = canvas.selectedFace ? canvas.selectedFace.selector : '>Y';
   const parentId = canvas.selectedBlockId || '001';
   
   closeSketch2d();
@@ -1267,3 +1281,85 @@ function executeJobPromise(jobId) {
     };
   });
 }
+
+// ═══════════════════════════════════════════════════════════════
+// Assembly Mates
+// ═══════════════════════════════════════════════════════════════
+
+window.showMateDialog = function() {
+  if (!canvas.sessionId) { showToast('Generate a part first'); return; }
+  const modal = document.getElementById('modalContent');
+  
+  const baseBlocks = canvas.blocks.filter(b => !['holes', 'fillets', 'chamfers', 'pockets', 'boss', 'shell', 'smart_fillet', 'flange_holes', 'mate'].includes(b.type));
+  if (baseBlocks.length < 2) { showToast('Need at least 2 parts to add a mate'); return; }
+  
+  let options = baseBlocks.map(b => `<option value="part_${b.id}">part_${b.id} (${b.type})</option>`).join('');
+  
+  let html = `<div class="modal-title">Add Assembly Mate</div>
+    <label>Part 1 <select id="mate_part1">${options}</select></label>
+    <label>Face 1 <input type="text" id="mate_face1" value=">Z" placeholder="e.g. >Z, <Z"></label>
+    <label>Part 2 <select id="mate_part2">${options}</select></label>
+    <label>Face 2 <input type="text" id="mate_face2" value="<Z" placeholder="e.g. <Z"></label>
+    <label>Type <select id="mate_type"><option>Plane</option><option>Axis</option><option>Point</option></select></label>
+    <div class="modal-actions">
+      <button class="btn-app" onclick="closeModal()">Cancel</button>
+      <button class="btn-app-primary" onclick="applyMate()">Add Mate</button>
+    </div>`;
+  modal.innerHTML = html;
+  document.getElementById('modalBackdrop').classList.add('visible');
+};
+
+window.applyMate = async function() {
+  const params = {
+    part1: document.getElementById('mate_part1').value,
+    face1: document.getElementById('mate_face1').value,
+    part2: document.getElementById('mate_part2').value,
+    face2: document.getElementById('mate_face2').value,
+    type: document.getElementById('mate_type').value
+  };
+  
+  closeModal();
+  showGenOverlay('Applying Mate...');
+  
+  try {
+    const res = await fetch('/canvas/add-block', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        session_id: canvas.sessionId, block_type: 'mate', params, parent_id: '001', face: ''
+      })
+    });
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    if (data.job_id) {
+      canvas.currentJobId = data.job_id;
+      await executeJobPromise(data.job_id);
+      await loadBlocks();
+      renderMatesList();
+    }
+  } catch (err) { hideGenOverlay(); showToast('Mate failed: ' + err.message); }
+};
+
+function renderMatesList() {
+  const list = document.getElementById('matesList');
+  if (!list) return;
+  const mates = canvas.blocks.filter(b => b.type === 'mate');
+  if (mates.length === 0) {
+    list.innerHTML = '<div style="padding:12px;color:var(--text-dim);font-size:11px;">No mates defined</div>';
+    return;
+  }
+  list.innerHTML = mates.map(m => {
+    return `<div class="tree-node" style="border-left: 2px solid #ff8c00;">
+      <span class="tree-node-icon">🔗</span>
+      <span class="tree-node-label">[b${m.id}] ${m.params.type}</span>
+      <span class="tree-node-dims">${m.params.part1} ↔ ${m.params.part2}</span>
+    </div>`;
+  }).join('');
+}
+
+// Hook into loadBlocks to render mates
+const originalLoadBlocks = loadBlocks;
+loadBlocks = async function() {
+  await originalLoadBlocks();
+  renderMatesList();
+};

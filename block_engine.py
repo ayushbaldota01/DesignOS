@@ -134,21 +134,15 @@ def update_block_param(script: str, block_id: str, param_key: str, new_value: an
 
     old_params[param_key] = str(new_value)
     
+    # Update the parameter and raw string
+    old_params[param_key] = str(new_value)
+    target["params_raw"] = ",".join(str(v) for v in old_params.values())
+    
     # Rebuild the code line
     parent_var = _resolve_parent_var(blocks, target["parent"])
-    new_code = _rebuild_code_line(target["type"], old_params, target["parent"], target["id"], parent_var)
-    new_params_raw = _rebuild_params_raw(old_params)
+    target["code_line"] = _rebuild_code_line(target["type"], old_params, target["parent"], target["id"], parent_var, target.get("face"))
     
-    # Rebuild the tag line
-    tag_parts = [f"# [BLOCK_{target['id']}] type={target['type']} params={new_params_raw}"]
-    if target["parent"]:
-        tag_parts.append(f"parent={target['parent']}")
-    if target["face"]:
-        tag_parts.append(f"face={target['face']}")
-    new_tag = " ".join(tag_parts)
-    
-    new_block = f"{new_tag}\n{new_code}"
-    return script.replace(target["full_match"], new_block)
+    return rebuild_script_from_blocks(blocks)
 
 
 def _rebuild_params_raw(params):
@@ -156,7 +150,7 @@ def _rebuild_params_raw(params):
     return ",".join(str(v) for v in params.values())
 
 
-def _rebuild_code_line(block_type, params, parent_id, block_id, parent_var="b001"):
+def _rebuild_code_line(block_type, params, parent_id, block_id, parent_var="b001", face_selector=">Y"):
     """Rebuild the Python code line from block type and params."""
     
     FEATURE_TYPES = {'holes', 'fillets', 'chamfers', 'pockets', 'boss', 'shell',
@@ -164,7 +158,7 @@ def _rebuild_code_line(block_type, params, parent_id, block_id, parent_var="b001
     
     if block_type in FEATURE_TYPES:
         args = ", ".join(str(v) for v in params.values())
-        return f"{parent_var} = FEATURE_MAP['{block_type}']({parent_var}, {args})"
+        return f"{parent_var} = FEATURE_MAP['{block_type}']({parent_var}, {args}, face_selector='{face_selector}')"
     else:
         # Separate base params from x, y, z
         base_args = []
@@ -181,8 +175,6 @@ def _rebuild_code_line(block_type, params, parent_id, block_id, parent_var="b001
         if x != 0 or y != 0 or z != 0:
             code_line += f".translate(({x}, {y}, {z}))"
             
-        if parent_id and parent_id != block_id:
-            code_line += f"\n{parent_var} = {parent_var}.union(b{block_id})"
         return code_line
 
 
@@ -190,9 +182,52 @@ def _rebuild_code_line(block_type, params, parent_id, block_id, parent_var="b001
 # Add block to script
 # ---------------------------------------------------------------------------
 
+def rebuild_script_from_blocks(blocks: list) -> str:
+    """Rebuilds the entire script including the assembly tail from a list of parsed blocks."""
+    script_lines = ["import cadquery as cq", "from templates import BASE_TEMPLATES, FEATURE_MAP"]
+    
+    FEATURE_TYPES = {'holes', 'fillets', 'chamfers', 'pockets', 'boss', 'shell',
+                     'smart_fillet', 'flange_holes'}
+                     
+    for b in blocks:
+        tag_parts = [f"# [BLOCK_{b['id']}] type={b['type']} params={b['params_raw']}"]
+        if b.get('parent'):
+            tag_parts.append(f"parent={b['parent']}")
+        if b.get('face'):
+            tag_parts.append(f"face={b['face']}")
+            
+        script_lines.append("")
+        script_lines.append(" ".join(tag_parts))
+        if b['type'] == 'mate':
+            script_lines.append("pass")
+        else:
+            script_lines.append(b['code_line'])
+
+    script_lines.append("\nresult = cq.Assembly()")
+    for b in blocks:
+        if b['type'] not in FEATURE_TYPES and b['type'] != "mate":
+            script_lines.append(f"result.add(b{b['id']}, name='part_{b['id']}')")
+            
+    for b in blocks:
+        if b['type'] == "mate":
+            try:
+                parts = b['params_raw'].split(',')
+                if len(parts) >= 5:
+                    p1, f1, p2, f2, m_t = parts[:5]
+                    script_lines.append(f"result = result.constrain('{p1}@faces@{f1}', '{p2}@faces@{f2}', '{m_t}')")
+            except Exception:
+                pass
+
+    script_lines.append("if isinstance(result, cq.Assembly):")
+    script_lines.append("    result.save(output_path)")
+    script_lines.append("else:")
+    script_lines.append("    cq.exporters.export(result, output_path)")
+    
+    return "\n".join(script_lines) + "\n"
+
 def add_block_to_script(script: str, block_type: str, params: dict,
-                        parent_id: str = "001", face_selector: str = ">Z") -> str:
-    """Append a new template block to an existing script."""
+                        parent_id: str = "001", face_selector: str = ">Y") -> str:
+    """Append a new template block to an existing script and regenerate it cleanly."""
     blocks = parse_blocks(script)
     new_id = str(len(blocks) + 1).zfill(3)
     parent_var = _resolve_parent_var(blocks, parent_id)
@@ -200,42 +235,45 @@ def add_block_to_script(script: str, block_type: str, params: dict,
     FEATURE_TYPES = {'holes', 'fillets', 'chamfers', 'pockets', 'boss', 'shell',
                      'smart_fillet', 'flange_holes'}
 
-    if block_type in FEATURE_TYPES:
+    code_line = ""
+    params_raw = ""
+
+    if block_type == "mate":
+        part1 = params.get('part1')
+        face1 = params.get('face1', '>Y')
+        part2 = params.get('part2')
+        face2 = params.get('face2', '<Y')
+        m_type = params.get('type', 'Plane')
+        code_line = "pass"
+        params_raw = f"{part1},{face1},{part2},{face2},{m_type}"
+    elif block_type in FEATURE_TYPES:
         args = ", ".join(str(v) for v in params.values())
         params_raw = ",".join(str(v) for v in params.values())
-        code_line = f"{parent_var} = FEATURE_MAP['{block_type}']({parent_var}, {args})"
+        code_line = f"{parent_var} = FEATURE_MAP['{block_type}']({parent_var}, {args}, face_selector='{face_selector}')"
     else:
-        # Extract x,y,z if present (or default to 0)
         x = float(params.pop('x', 0.0))
         y = float(params.pop('y', 0.0))
         z = float(params.pop('z', 0.0))
-        # Reconstruct params dict to include them for raw string
         params['x'] = x
         params['y'] = y
         params['z'] = z
         params_raw = ",".join(str(v) for v in params.values())
-        
-        # Base arguments
         base_args = ", ".join(str(v) for k, v in params.items() if k not in ('x', 'y', 'z'))
         
         code_line = f"b{new_id} = BASE_TEMPLATES['{block_type}']({base_args})"
         if x != 0 or y != 0 or z != 0:
             code_line += f".translate(({x}, {y}, {z}))"
-        code_line += "\n"
-        
-        # Union the new block with the parent so it appears in the final model
-        code_line += f"{parent_var} = {parent_var}.union(b{new_id})"
 
-    tag_line = f"# [BLOCK_{new_id}] type={block_type} params={params_raw} parent={parent_id} face={face_selector}"
-    new_block = f"\n{tag_line}\n{code_line}\n"
+    blocks.append({
+        "id": new_id,
+        "type": block_type,
+        "params_raw": params_raw,
+        "parent": parent_id,
+        "face": face_selector,
+        "code_line": code_line
+    })
 
-    # Insert before the result = line
-    if "\nresult = " in script:
-        script = script.replace("\nresult = ", f"{new_block}\nresult = ", 1)
-    else:
-        script += new_block
-
-    return script
+    return rebuild_script_from_blocks(blocks)
 
 
 # ---------------------------------------------------------------------------
@@ -390,7 +428,11 @@ def assemble_block_script(form_data: dict, params: dict) -> str:
         lines.append(f"b{parent} = FEATURE_MAP['{ft}'](b{parent}, {fillet_r})")
         lines.append("")
 
-    lines.append(f"result = b{parent}")
-    lines.append("cq.exporters.export(result, output_path)")
+    lines.append(f"result = cq.Assembly()")
+    lines.append(f"result.add(b{parent}, name='part_{parent}')")
+    lines.append("if isinstance(result, cq.Assembly):")
+    lines.append("    result.save(output_path)")
+    lines.append("else:")
+    lines.append("    cq.exporters.export(result, output_path)")
 
     return "\n".join(lines)

@@ -1,7 +1,7 @@
 """
 DesignOS Template Library — Pure CadQuery parametric templates.
-Each base template returns a CadQuery Workplane. Each feature add-on
-takes an existing result + parameters and returns the modified result.
+Each base template returns a CadQuery Workplane oriented to face +Y axis.
+Each feature add-on takes an existing result + parameters and returns the modified result, operating on the selected face.
 All dimensions in mm.
 """
 import math
@@ -28,21 +28,24 @@ def get_safe_bbox(body: cq.Workplane) -> Tuple[float, float, float]:
 
 def core_primitive() -> cq.Workplane:
     """Absolute final fallback marker."""
-    return cq.Workplane("XY").box(10, 10, 10).faces(">Z").workplane().tag("ERROR_STATE").end().end()
+    return cq.Workplane("XY").box(10, 10, 10).rotate((0,0,0),(1,0,0),-90).faces(">Y").workplane().tag("ERROR_STATE").end().end()
 
 
 # ═══════════════════════════════════════════════════════════════════
-# BASE GEOMETRY TEMPLATES
+# BASE GEOMETRY TEMPLATES (ALL ROTATED TO FACE +Y)
 # ═══════════════════════════════════════════════════════════════════
+
+def _orient(res: cq.Workplane, face_sel=">Y") -> cq.Workplane:
+    """Helper to rotate shape to face +Y and tag the primary face."""
+    r = res.rotate((0,0,0), (1,0,0), -90)
+    return r.faces(face_sel).workplane().tag("base_top").end().end()
 
 def make_bracket(length, width, height, wall_t):
-    """Self-validating L-shaped mounting bracket."""
     min_dim = min(length, width, height)
     t = min(wall_t, height * 0.15, width * 0.15, 5.0)
     t = max(t, max(1.5, min_dim * 0.04))
     t = round(t, 2)
     wall_h = height - t
-
     fillet_r = min(t * 0.8, wall_h * 0.4, (width - t) * 0.4)
     fillet_r = max(fillet_r, 0.0)
 
@@ -78,13 +81,15 @@ def make_bracket(length, width, height, wall_t):
         )
 
     result = profile.extrude(length).translate((-length/2, 0, 0))
-    base_top_sel = cq.selectors.NearestToPointSelector((0, t/2, t/2))
-    result = result.faces(base_top_sel).workplane().tag("base_top").end().end()
-    
-    return result
+    # Note: original tag selection was nearest to (0, t/2, t/2).
+    # Since we rotate around X by -90:
+    # +Z becomes +Y. +Y becomes -Z.
+    # The point (0, t/2, t/2) -> (0, -t/2, t/2) in the rotated frame.
+    r = result.rotate((0,0,0), (1,0,0), -90)
+    base_top_sel = cq.selectors.NearestToPointSelector((0, -t/2, t/2))
+    return r.faces(base_top_sel).workplane().tag("base_top").end().end()
 
 def l_bracket(height=100.0, base_length=60.0, width=60.0, thickness=20.0, root_fillet=5.0) -> cq.Workplane:
-    """Production Core: Geometry Contract: X-axis aligned L-bracket."""
     h = validate_bounds(height, 20.0, 2000.0, 100.0)
     bl = validate_bounds(base_length, 20.0, 2000.0, 60.0)
     w = validate_bounds(width, 10.0, 2000.0, 60.0)
@@ -123,16 +128,13 @@ def l_bracket(height=100.0, base_length=60.0, width=60.0, thickness=20.0, root_f
         )
         
     result = profile.extrude(bl).translate((-bl/2, 0, 0))
-    base_top_sel = cq.selectors.NearestToPointSelector((0, t/2, t/2))
-    # Tag flange_base specifically for flange_holes feature
-    result = result.faces(base_top_sel).workplane().tag("flange_base").end().end()
-    # Also tag base_top for general compatibility
-    result = result.faces(base_top_sel).workplane().tag("base_top").end().end()
-    
-    return result
+    r = result.rotate((0,0,0), (1,0,0), -90)
+    base_top_sel = cq.selectors.NearestToPointSelector((0, -t/2, t/2))
+    r = r.faces(base_top_sel).workplane().tag("flange_base").end().end()
+    r = r.faces(base_top_sel).workplane().tag("base_top").end().end()
+    return r
 
 def i_beam(height=100.0, width=50.0, length=200.0, web_thickness=5.0, flange_thickness=10.0) -> cq.Workplane:
-    """Production Core: I-Beam structural profile."""
     h = validate_bounds(height, 20.0, 2000.0, 100.0)
     w = validate_bounds(width, 10.0, 2000.0, 50.0)
     l = validate_bounds(length, 20.0, 5000.0, 200.0)
@@ -156,10 +158,9 @@ def i_beam(height=100.0, width=50.0, length=200.0, web_thickness=5.0, flange_thi
         .close()
     )
     result = profile.extrude(l)
-    return result.faces(">Z").workplane().tag("base_top").end().end()
+    return _orient(result)
 
 def two_stage_parallel_shaft(d1=20.0, l1=50.0, d2=30.0, l2=50.0) -> cq.Workplane:
-    """Production Core: Concentric 2-stage parallel shaft."""
     d1 = validate_bounds(d1, 2.0, 500.0, 20.0)
     l1 = validate_bounds(l1, 5.0, 1000.0, 50.0)
     d2 = validate_bounds(d2, 2.0, 500.0, 30.0)
@@ -167,15 +168,14 @@ def two_stage_parallel_shaft(d1=20.0, l1=50.0, d2=30.0, l2=50.0) -> cq.Workplane
     
     stage1 = cq.Workplane("XY").circle(d1/2).extrude(l1)
     stage2 = cq.Workplane("XY").workplane(offset=l1).circle(d2/2).extrude(l2)
-    
     result = stage1.union(stage2)
-    return result.faces(">Z").workplane().tag("base_top").end().end()
+    return _orient(result)
 
 def make_plate(length, width, height):
     l = validate_bounds(length, 1.0, 5000.0, 100.0)
     w = validate_bounds(width, 1.0, 5000.0, 60.0)
     h = validate_bounds(height, 0.1, 1000.0, 10.0)
-    return cq.Workplane("XY").box(l, w, h).faces(">Z").workplane().tag("base_top").end().end()
+    return _orient(cq.Workplane("XY").box(l, w, h))
 
 def make_shaft(diameter, length):
     d = validate_bounds(diameter, 1.0, 2000.0, 20.0)
@@ -186,7 +186,7 @@ def make_shaft(diameter, length):
         shaft = shaft.edges(">Z or <Z").chamfer(c)
     except Exception:
         pass
-    return shaft.faces(">Z").workplane().tag("base_top").end().end()
+    return _orient(shaft)
 
 def make_housing(length, width, height, wall_t):
     l = validate_bounds(length, 10.0, 5000.0, 80.0)
@@ -197,14 +197,15 @@ def make_housing(length, width, height, wall_t):
     box = cq.Workplane("XY").box(l, w, h)
     try:
         housed = box.faces(">Z").shell(-t)
-        sel = cq.selectors.NearestToPointSelector((0, 0, -h/2 + t))
-        return housed.faces(sel).workplane().tag("base_top").end().end()
+        rotated = housed.rotate((0,0,0), (1,0,0), -90)
+        sel = cq.selectors.NearestToPointSelector((0, -h/2 + t, 0))
+        return rotated.faces(sel).workplane().tag("base_top").end().end()
     except Exception:
-        # Fallback if shell fails
         inner = cq.Workplane("XY").box(l - 2*t, w - 2*t, h - t).translate((0, 0, t/2))
         housed = box.cut(inner)
-        sel = cq.selectors.NearestToPointSelector((0, 0, -h/2 + t))
-        return housed.faces(sel).workplane().tag("base_top").end().end()
+        rotated = housed.rotate((0,0,0), (1,0,0), -90)
+        sel = cq.selectors.NearestToPointSelector((0, -h/2 + t, 0))
+        return rotated.faces(sel).workplane().tag("base_top").end().end()
 
 def make_channel(length, width, height, wall_t):
     l = validate_bounds(length, 10.0, 5000.0, 100.0)
@@ -225,8 +226,10 @@ def make_channel(length, width, height, wall_t):
         .close()
     )
     result = profile.extrude(l).translate((-l/2, 0, 0))
-    sel = cq.selectors.NearestToPointSelector((0, 0, -h/2 + t))
-    return result.faces(sel).workplane().tag("base_top").end().end()
+    # rotated nearest point
+    r = result.rotate((0,0,0), (1,0,0), -90)
+    sel = cq.selectors.NearestToPointSelector((0, -h/2 + t, 0))
+    return r.faces(sel).workplane().tag("base_top").end().end()
 
 def make_flange(length, width, height, wall_t):
     l = validate_bounds(length, 10.0, 2000.0, 60.0)
@@ -236,7 +239,7 @@ def make_flange(length, width, height, wall_t):
     
     bore_d = min(l, w) - 2 * t
     res = cq.Workplane("XY").box(l, w, h).faces(">Z").workplane().hole(bore_d)
-    return res.faces(">Z").workplane().tag("base_top").end().end()
+    return _orient(res)
 
 def make_gear(diameter, height):
     d = validate_bounds(diameter, 10.0, 2000.0, 50.0)
@@ -249,7 +252,7 @@ def make_gear(diameter, height):
     kw_w = bore_d * 0.25
     kw_h = bore_d * 0.15
     res = res.faces(">Z").workplane().rect(kw_w, bore_d + kw_h).cutBlind(-h)
-    return res.faces(">Z").workplane().tag("base_top").end().end()
+    return _orient(res)
 
 
 BASE_TEMPLATES = {
@@ -273,26 +276,26 @@ BASE_TEMPLATES = {
 # FEATURE ADD-ONS
 # ═══════════════════════════════════════════════════════════════════
 
-def get_working_plane(result, fallback_selector=">Z"):
+def get_working_plane(result, face_selector=">Y"):
     try:
         return result.workplaneFromTagged("base_top")
     except Exception:
-        return result.faces(fallback_selector).workplane()
+        return result.faces(face_selector).workplane()
 
-def add_flange_holes(body, face_tag="flange_base", dia=8.0, clearance=16.0):
-    """Production Core: Adds symmetrically clearance-aware holes."""
+def add_flange_holes(body, face_tag="flange_base", dia=8.0, clearance=16.0, face_selector=">Y"):
     try:
         if face_tag:
             target_face = body.workplaneFromTagged(face_tag)
         else:
-            target_face = body.faces(">Z").workplane()
+            target_face = body.faces(face_selector).workplane()
             
         bbox = body.val().BoundingBox()
         d = validate_bounds(dia, 1.0, 100.0, 8.0)
         clear = validate_bounds(clearance, d, 500.0, 16.0)
         
         x_dist = bbox.xlen - clear
-        y_dist = bbox.ylen - clear
+        # Y length in local coordinates depends on orientation, but bounding box uses global
+        y_dist = bbox.ylen - clear if face_selector in (">Z", "<Z") else bbox.zlen - clear
         
         if x_dist < d * 2 or y_dist < d * 2:
             return body
@@ -305,21 +308,21 @@ def add_flange_holes(body, face_tag="flange_base", dia=8.0, clearance=16.0):
     except Exception as e:
         return body
 
-def apply_smart_fillet(body, radius=2.0):
-    """Production Core: Robust fillet capable of backing off radius gracefully."""
+def apply_smart_fillet(body, radius=2.0, face_selector=">Y"):
+    """Fillets the specific edges bounding the selected face."""
     try:
         r = validate_bounds(radius, 0.1, 50.0, 2.0)
-        return body.edges("|Z").fillet(r)
+        return body.faces(face_selector).edges().fillet(r)
     except Exception:
         try:
-            return body.edges("|Z").fillet(r * 0.5)
+            return body.faces(face_selector).edges().fillet(r * 0.5)
         except Exception:
             return body
 
-def add_holes(result, hole_points, hole_dia, depth=None):
+def add_holes(result, hole_points, hole_dia, depth=None, face_selector=">Y"):
     try:
         d = validate_bounds(hole_dia, 0.1, 500.0, 6.6)
-        wp = get_working_plane(result)
+        wp = get_working_plane(result, face_selector)
         if depth:
             dp = validate_bounds(depth, 0.1, 1000.0, 10.0)
             return wp.pushPoints(hole_points).hole(d, dp)
@@ -327,48 +330,48 @@ def add_holes(result, hole_points, hole_dia, depth=None):
     except Exception:
         return result
 
-def add_fillets(result, radius, edge_selector="|Z"):
+def add_fillets(result, radius, face_selector=">Y"):
     try:
         r = validate_bounds(radius, 0.1, 50.0, 2.0)
-        return result.edges(edge_selector).fillet(r)
+        return result.faces(face_selector).edges().fillet(r)
     except Exception:
         return result
 
-def add_chamfers(result, size, edge_selector="|Z"):
+def add_chamfers(result, size, face_selector=">Y"):
     try:
         s = validate_bounds(size, 0.1, 50.0, 1.0)
-        return result.edges(edge_selector).chamfer(s)
+        return result.faces(face_selector).edges().chamfer(s)
     except Exception:
         return result
 
-def add_pocket(result, pocket_w, pocket_l, depth, x=0, y=0):
+def add_pocket(result, pocket_w, pocket_l, depth, x=0, y=0, face_selector=">Y"):
     try:
         w = validate_bounds(pocket_w, 0.1, 1000.0, 20.0)
         l = validate_bounds(pocket_l, 0.1, 1000.0, 20.0)
         d = validate_bounds(depth, 0.1, 1000.0, 5.0)
         cx = float(x)
         cy = float(y)
-        wp = get_working_plane(result)
+        wp = get_working_plane(result, face_selector)
         if cx != 0 or cy != 0:
             return wp.center(cx, cy).rect(w, l).cutBlind(-d)
         return wp.rect(w, l).cutBlind(-d)
     except Exception:
         return result
 
-def add_shell(result, wall_t):
+def add_shell(result, wall_t, face_selector=">Y"):
     try:
         t = validate_bounds(wall_t, 0.1, 100.0, 2.0)
-        return result.faces(">Z").shell(-t)
+        return result.faces(face_selector).shell(-t)
     except Exception:
         return result
 
-def add_boss(result, diameter, height, x=0, y=0):
+def add_boss(result, diameter, height, x=0, y=0, face_selector=">Y"):
     try:
         d = validate_bounds(diameter, 0.1, 1000.0, 15.0)
         h = validate_bounds(height, 0.1, 1000.0, 5.0)
         cx = float(x)
         cy = float(y)
-        wp = get_working_plane(result)
+        wp = get_working_plane(result, face_selector)
         boss = wp.center(cx, cy).circle(d / 2).extrude(h)
         return result.union(boss)
     except Exception:
