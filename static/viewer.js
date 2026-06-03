@@ -260,7 +260,7 @@ export class CADViewer {
       this.clearFaceSelection();
 
       // Extract only the triangles belonging to the clicked face
-      const highlightGeo = this._extractFaceGeometry(hit.object, hit.face, hit.point);
+      const highlightGeo = this._extractFaceGeometry(hit.object, hit.face, hit.point, hit.faceIndex);
       const highlightMat = new THREE.MeshBasicMaterial({
         color: COLORS.faceHighlight,
         transparent: true,
@@ -347,38 +347,100 @@ export class CADViewer {
     return 'TOP FACE';
   }
 
-  _extractFaceGeometry(mesh, hitFace, hitPoint) {
+  _extractFaceGeometry(mesh, hitFace, hitPoint, faceIndex) {
     const geo = mesh.geometry;
     const pos = geo.attributes.position.array;
-    
-    const targetNormal = hitFace.normal;
-    const localPt = mesh.worldToLocal(hitPoint.clone());
-    
-    const newPos = [];
-    const vA = new THREE.Vector3();
-    const vB = new THREE.Vector3();
-    const vC = new THREE.Vector3();
-    const cb = new THREE.Vector3();
-    const ab = new THREE.Vector3();
-    const triNorm = new THREE.Vector3();
-    
-    // STLLoader produces non-indexed geometry
     const count = pos.length / 9;
-    for (let i = 0; i < count; i++) {
-      vA.fromArray(pos, i * 9);
-      vB.fromArray(pos, i * 9 + 3);
-      vC.fromArray(pos, i * 9 + 6);
+
+    // Build edge map (cache it for performance)
+    if (!geo.userData.edgeMap) {
+      const edgeMap = new Map();
+      const toHash = (v) => Math.round(v * 1000);
+      const getHash = (idx) => toHash(pos[idx]) + '_' + toHash(pos[idx+1]) + '_' + toHash(pos[idx+2]);
       
-      cb.subVectors(vC, vB);
-      ab.subVectors(vA, vB);
-      triNorm.crossVectors(cb, ab).normalize();
-      
-      if (triNorm.dot(targetNormal) > 0.99) {
-        const dist = Math.abs(triNorm.dot(vA.clone().sub(localPt)));
-        if (dist < 0.1) {
-          newPos.push(vA.x, vA.y, vA.z, vB.x, vB.y, vB.z, vC.x, vC.y, vC.z);
+      for (let i = 0; i < count; i++) {
+        const h1 = getHash(i * 9);
+        const h2 = getHash(i * 9 + 3);
+        const h3 = getHash(i * 9 + 6);
+        
+        const edges = [
+          h1 < h2 ? h1 + '|' + h2 : h2 + '|' + h1,
+          h2 < h3 ? h2 + '|' + h3 : h3 + '|' + h2,
+          h3 < h1 ? h3 + '|' + h1 : h1 + '|' + h3
+        ];
+        
+        for (const edge of edges) {
+          if (!edgeMap.has(edge)) edgeMap.set(edge, []);
+          edgeMap.get(edge).push(i);
         }
       }
+      geo.userData.edgeMap = edgeMap;
+      
+      // Precompute normals for speed
+      const normals = new Float32Array(count * 3);
+      const vA = new THREE.Vector3(), vB = new THREE.Vector3(), vC = new THREE.Vector3();
+      const cb = new THREE.Vector3(), ab = new THREE.Vector3(), triNorm = new THREE.Vector3();
+      for (let i = 0; i < count; i++) {
+        vA.fromArray(pos, i * 9);
+        vB.fromArray(pos, i * 9 + 3);
+        vC.fromArray(pos, i * 9 + 6);
+        cb.subVectors(vC, vB);
+        ab.subVectors(vA, vB);
+        triNorm.crossVectors(cb, ab).normalize();
+        normals[i*3] = triNorm.x;
+        normals[i*3+1] = triNorm.y;
+        normals[i*3+2] = triNorm.z;
+      }
+      geo.userData.triNormals = normals;
+    }
+    
+    const edgeMap = geo.userData.edgeMap;
+    const triNormals = geo.userData.triNormals;
+    
+    const toHash = (v) => Math.round(v * 1000);
+    const getHash = (idx) => toHash(pos[idx]) + '_' + toHash(pos[idx+1]) + '_' + toHash(pos[idx+2]);
+    
+    // Flood fill
+    const visited = new Set([faceIndex]);
+    const queue = [faceIndex];
+    const n1 = new THREE.Vector3(), n2 = new THREE.Vector3();
+    
+    while (queue.length > 0) {
+      const curTri = queue.shift();
+      n1.fromArray(triNormals, curTri * 3);
+      
+      const h1 = getHash(curTri * 9);
+      const h2 = getHash(curTri * 9 + 3);
+      const h3 = getHash(curTri * 9 + 6);
+      
+      const edges = [
+        h1 < h2 ? h1 + '|' + h2 : h2 + '|' + h1,
+        h2 < h3 ? h2 + '|' + h3 : h3 + '|' + h2,
+        h3 < h1 ? h3 + '|' + h1 : h1 + '|' + h3
+      ];
+      
+      for (const edge of edges) {
+        const adjTris = edgeMap.get(edge) || [];
+        for (const adjTri of adjTris) {
+          if (!visited.has(adjTri)) {
+            n2.fromArray(triNormals, adjTri * 3);
+            // ~36 degrees threshold for smooth surfaces
+            if (n1.dot(n2) > 0.8) {
+              visited.add(adjTri);
+              queue.push(adjTri);
+            }
+          }
+        }
+      }
+    }
+    
+    const newPos = [];
+    for (const tri of visited) {
+      newPos.push(
+        pos[tri*9], pos[tri*9+1], pos[tri*9+2],
+        pos[tri*9+3], pos[tri*9+4], pos[tri*9+5],
+        pos[tri*9+6], pos[tri*9+7], pos[tri*9+8]
+      );
     }
     
     const hGeo = new THREE.BufferGeometry();
