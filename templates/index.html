@@ -15,6 +15,23 @@
     }
   }
   </script>
+  <style>
+    .mate-status-bar {
+        position: absolute;
+        top: 12px; left: 50%; transform: translateX(-50%);
+        background: rgba(0,120,212,0.9);
+        color: #fff; padding: 6px 16px;
+        display: flex; align-items: center; gap: 12px;
+        font-size: 11px; font-family: var(--mono);
+        z-index: 50; pointer-events: all;
+        border-radius: 4px;
+    }
+    .mate-status-bar button {
+        background: rgba(255,255,255,0.2); border: 1px solid rgba(255,255,255,0.4);
+        color: #fff; padding: 3px 10px; cursor: pointer;
+        font-family: var(--mono); font-size: 10px; border-radius: 2px;
+    }
+  </style>
 </head>
 <body>
 
@@ -374,6 +391,12 @@
             <button class="tool-btn" onclick="toggleGizmo('rotate')" style="font-size: 11px; padding: 4px 8px;">↻ Rotate</button>
             <button class="tool-btn" onclick="disableGizmo()" style="font-size: 11px; padding: 4px 8px;">✕ Off</button>
         </div>
+
+        <!-- Mate status bar -->
+        <div id="mateStatusBar" class="mate-status-bar" style="display:none">
+            <span id="mateStatus">Click source face</span>
+            <button id="mateCancelBtn" onclick="cancelFaceMate()" style="display:none">Cancel</button>
+        </div>
       </div>
 
       <!-- Chat panel -->
@@ -436,7 +459,7 @@
         <div class="mates-list" id="matesList">
           <div style="padding:12px;color:var(--text-dim);font-size:11px;">No mates defined</div>
         </div>
-        <button class="btn-app" style="margin: 8px; width: calc(100% - 16px);" onclick="showMateDialog()">+ Add Mate</button>
+        <button class="btn-app" style="margin: 8px; width: calc(100% - 16px);" onclick="activateFaceMateFromPanel()">⊕ Mate Faces</button>
       </div>
 
       <div class="right-panel-section" style="flex:1;display:flex;flex-direction:column;">
@@ -566,12 +589,12 @@
 <!-- ═══════════════════════════════════════════════════════════════
      SCRIPTS
      ═══════════════════════════════════════════════════════════════ -->
-<script src="/static/canvas.js?v=6"></script>
-<script src="/static/editor.js?v=6"></script>
-<script src="/static/manual_sketch.js?v=6"></script>
+<script src="/static/canvas.js?v=10"></script>
+<script src="/static/editor.js?v=10"></script>
+<script src="/static/manual_sketch.js?v=10"></script>
 
 <script type="module">
-  import { CADViewer } from '/static/viewer.js?v=6';
+  import { CADViewer } from '/static/viewer.js?v=10';
 
   // Initialize viewer in the prompt tab viewport
   const viewer = new CADViewer('viewerCanvas');

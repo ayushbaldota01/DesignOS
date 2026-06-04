@@ -11,27 +11,6 @@ import math
 # Block parsing
 # ---------------------------------------------------------------------------
 
-PARAM_SCHEMAS = {
-    "bracket":  ["length", "width", "height", "wall_t", "x", "y", "z"],
-    "l_bracket":["height", "base_length", "width", "thickness", "root_fillet", "x", "y", "z"],
-    "plate":    ["length", "width", "height", "x", "y", "z"],
-    "shaft":    ["diameter", "length", "x", "y", "z"],
-    "housing":  ["length", "width", "height", "wall_t", "x", "y", "z"],
-    "channel":  ["length", "width", "height", "wall_t", "x", "y", "z"],
-    "flange":   ["length", "width", "height", "wall_t", "x", "y", "z"],
-    "gear":     ["diameter", "height", "x", "y", "z"],
-    "i_beam":   ["height", "width", "length", "web_thickness", "flange_thickness", "x", "y", "z"],
-    "two_stage_parallel_shaft": ["d1", "l1", "d2", "l2", "x", "y", "z"],
-    "holes":    ["hole_points", "hole_dia"],
-    "fillets":  ["radius"],
-    "chamfers": ["size"],
-    "pockets":  ["width", "length", "depth", "x", "y"],
-    "boss":     ["diameter", "height", "x", "y"],
-    "shell":    ["wall_t"],
-    "smart_fillet": ["radius"],
-    "flange_holes": ["face_tag", "dia", "clearance"],
-}
-
 BLOCK_PATTERN = re.compile(
     r'# \[BLOCK_(\d+)\] type=(\w+) params=(.+?)(?:\s+parent=(\d+))?(?:\s+face=(\S+))?\n'
     r'([^\n]+)',
@@ -60,6 +39,26 @@ def parse_blocks(script: str) -> list:
 
 def _parse_params(block_type, params_raw):
     """Convert params_raw string into a named dict based on block type."""
+    PARAM_SCHEMAS = {
+        "bracket":  ["length", "width", "height", "wall_t", "x", "y", "z", "rot_x", "rot_y", "rot_z"],
+        "l_bracket":["height", "base_length", "width", "thickness", "root_fillet", "x", "y", "z", "rot_x", "rot_y", "rot_z"],
+        "plate":    ["length", "width", "height", "x", "y", "z", "rot_x", "rot_y", "rot_z"],
+        "shaft":    ["diameter", "length", "x", "y", "z", "rot_x", "rot_y", "rot_z"],
+        "housing":  ["length", "width", "height", "wall_t", "x", "y", "z", "rot_x", "rot_y", "rot_z"],
+        "channel":  ["length", "width", "height", "wall_t", "x", "y", "z", "rot_x", "rot_y", "rot_z"],
+        "flange":   ["length", "width", "height", "wall_t", "x", "y", "z", "rot_x", "rot_y", "rot_z"],
+        "gear":     ["diameter", "height", "x", "y", "z", "rot_x", "rot_y", "rot_z"],
+        "i_beam":   ["height", "width", "length", "web_thickness", "flange_thickness", "x", "y", "z", "rot_x", "rot_y", "rot_z"],
+        "two_stage_parallel_shaft": ["d1", "l1", "d2", "l2", "x", "y", "z", "rot_x", "rot_y", "rot_z"],
+        "holes":    ["hole_points", "hole_dia"],
+        "fillets":  ["radius"],
+        "chamfers": ["size"],
+        "pockets":  ["width", "length", "depth", "x", "y", "rot_z"],
+        "boss":     ["diameter", "height", "x", "y", "rot_z"],
+        "shell":    ["wall_t"],
+        "smart_fillet": ["radius"],
+        "flange_holes": ["face_tag", "dia", "clearance"],
+    }
     schema = PARAM_SCHEMAS.get(block_type, [])
     
     # Try JSON first
@@ -130,27 +129,40 @@ def update_block_param(script: str, block_id: str, param_key: str, new_value: an
 
     # Parse old params, update the key, rebuild
     old_params = target["params"]
-    
-    # Allow adding x, y, z dynamically for gizmo transforms even if they didn't exist
-    if param_key not in old_params and param_key not in ['x', 'y', 'z', 'rot_x', 'rot_y', 'rot_z']:
+    if param_key not in old_params:
         return script
 
     old_params[param_key] = str(new_value)
     
-    # Update the raw string based on schema order
-    schema = PARAM_SCHEMAS.get(target["type"], [])
-    ordered_vals = []
-    for k in schema:
-        if k in old_params:
-            ordered_vals.append(str(old_params[k]))
-    
-    # If the block type doesn't have a strict schema match, fallback to just values
-    if not ordered_vals:
-        ordered_vals = [str(v) for v in old_params.values()]
-        
-    target["params_raw"] = ",".join(ordered_vals)
+    # Update the parameter and raw string
+    old_params[param_key] = str(new_value)
+    target["params_raw"] = ",".join(str(v) for v in old_params.values())
     
     # Rebuild the code line
+    parent_var = _resolve_parent_var(blocks, target["parent"])
+    target["code_line"] = _rebuild_code_line(target["type"], old_params, target["parent"], target["id"], parent_var, target.get("face"))
+    
+    return rebuild_script_from_blocks(blocks)
+
+
+def update_block_params(script: str, block_id: str, updates: dict) -> str:
+    """Updates multiple parameters simultaneously inside a tagged block script."""
+    blocks = parse_blocks(script)
+    target = next((b for b in blocks if b["id"] == block_id), None)
+    if not target:
+        return script
+
+    old_params = target["params"]
+    changed = False
+    
+    for param_key, new_value in updates.items():
+        old_params[param_key] = str(new_value)
+        changed = True
+            
+    if not changed:
+        return script
+
+    target["params_raw"] = ",".join(str(v) for v in old_params.values())
     parent_var = _resolve_parent_var(blocks, target["parent"])
     target["code_line"] = _rebuild_code_line(target["type"], old_params, target["parent"], target["id"], parent_var, target.get("face"))
     
@@ -176,7 +188,6 @@ def _rebuild_code_line(block_type, params, parent_id, block_id, parent_var="b001
         base_args = []
         x, y, z = 0.0, 0.0, 0.0
         rx, ry, rz = 0.0, 0.0, 0.0
-        
         for k, v in params.items():
             if k == 'x': x = float(v)
             elif k == 'y': y = float(v)
@@ -189,10 +200,13 @@ def _rebuild_code_line(block_type, params, parent_id, block_id, parent_var="b001
         args_str = ", ".join(base_args)
         code_line = f"b{block_id} = BASE_TEMPLATES['{block_type}']({args_str})"
         
-        if rx != 0: code_line += f".rotate((0,0,0), (1,0,0), {rx})"
-        if ry != 0: code_line += f".rotate((0,0,0), (0,1,0), {ry})"
-        if rz != 0: code_line += f".rotate((0,0,0), (0,0,1), {rz})"
-        
+        if rz != 0:
+            code_line += f".rotate((0,0,0), (0,0,1), {rz})"
+        if ry != 0:
+            code_line += f".rotate((0,0,0), (0,1,0), {ry})"
+        if rx != 0:
+            code_line += f".rotate((0,0,0), (1,0,0), {rx})"
+            
         if x != 0 or y != 0 or z != 0:
             code_line += f".translate(({x}, {y}, {z}))"
             

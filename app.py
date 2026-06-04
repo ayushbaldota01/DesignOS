@@ -15,7 +15,7 @@ import subprocess
 from flask import Flask, request, jsonify, send_file, render_template, Response
 from flask_cors import CORS
 import requests as http_requests
-from block_engine import parse_blocks, update_block_param, add_block_to_script, assemble_block_script
+from block_engine import parse_blocks, update_block_param, update_block_params, add_block_to_script, assemble_block_script
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -383,6 +383,21 @@ if _designos_export_target is not None:
             _designos_export_target.save(output_path)
             _designos_export_target.save(stl_output_path, exportType='STL')
             _designos_export_target.save(glb_output_path) # Auto-detects GLTF/GLB
+            
+            # Export individual parts of the assembly for UI gizmo selection
+            part_idx = 0
+            for name, sub_assy in _designos_export_target.objects.items():
+                if getattr(sub_assy, 'obj', None) is not None:
+                    try:
+                        p_stl = stl_output_path.replace(".stl", f"_part{part_idx}.stl")
+                        if hasattr(sub_assy.obj, 'val'):
+                            placed = sub_assy.obj.val().moved(sub_assy.loc)
+                        else:
+                            placed = sub_assy.obj.moved(sub_assy.loc)
+                        _cq.exporters.export(placed, p_stl)
+                        part_idx += 1
+                    except Exception as ex:
+                        print("Error exporting part:", ex)
         else:
             _cq.exporters.export(_designos_export_target, output_path)
             _cq.exporters.export(_designos_export_target, stl_output_path)
@@ -709,6 +724,7 @@ def stream_job(job_id):
                          "has_stl_file": job.get("stl_file") is not None,
                          "has_step_file": job.get("step_file") is not None,
                          "has_glb_file": job.get("glb_file") is not None,
+                         "part_count": job.get("part_count", 0),
                          "script": job.get("script", ""),
                          "error": job.get("error")}
                 yield f"data: {json.dumps(final)}\n\n"
@@ -920,6 +936,7 @@ Rules:
 # ---------------------------------------------------------------------------
 # Assembly Engine Endpoints
 # ---------------------------------------------------------------------------
+import inspect
 from assembly_engine import assemble_parts, generate_assembly_script
 
 @app.route("/assembly/build", methods=["POST"])
@@ -932,6 +949,7 @@ def build_assembly():
         return jsonify({"error": "No parts provided"}), 400
     
     job_id = _new_job("assembly")
+    jobs[job_id]["parts_list"] = parts_list
     
     def execute():
         _log(job_id, "assembly", "running", f"Assembling {len(parts_list)} parts...")
@@ -943,6 +961,9 @@ def build_assembly():
                 jobs[job_id]["assembly_script"] = script
                 jobs[job_id]["step_file"] = os.path.join(TEMP_DIR, f"{job_id}.step")
                 jobs[job_id]["stl_file"] = os.path.join(TEMP_DIR, f"{job_id}.stl")
+                
+                # Export each part individually for gizmo selection
+                _export_individual_parts(job_id, parts_list)
             else:
                 _log(job_id, "complete", "error", error)
         except Exception as e:
@@ -950,6 +971,86 @@ def build_assembly():
     
     threading.Thread(target=execute, daemon=True).start()
     return jsonify({"job_id": job_id})
+
+def _export_individual_parts(job_id, parts_list):
+    """Export each assembly part as a separate STL via subprocess (cadquery lives in Miniconda, not venv2)."""
+    individual_parts = []
+    
+    for i, part_def in enumerate(parts_list):
+        template_name = part_def.get("template", "plate")
+        part_params = part_def.get("params", {})
+        pos = part_def.get("position", {"x": 0, "y": 0, "z": 0})
+        
+        # Build a tiny script that generates one part and exports it
+        stl_path_fwd = os.path.join(TEMP_DIR, f"{job_id}_part{i}.stl").replace("\\", "/")
+        desigos_path = r"H:\DesignOS".replace("\\", "/")
+        
+        script = f"""
+import sys, inspect
+sys.path.insert(0, '{desigos_path}')
+import cadquery as cq
+from templates import BASE_TEMPLATES
+
+fn = BASE_TEMPLATES.get('{template_name}')
+if fn is None:
+    fn = BASE_TEMPLATES.get('plate')
+
+sig = inspect.signature(fn)
+valid = set(sig.parameters.keys())
+raw = {{{', '.join(f'"{k}": {float(v)}' for k, v in part_params.items())}}}
+filtered = {{k: v for k, v in raw.items() if k in valid}}
+
+try:
+    body = fn(**filtered)
+except:
+    body = fn()
+
+body = body.translate(({float(pos.get('x',0))}, {float(pos.get('y',0))}, {float(pos.get('z',0))}))
+cq.exporters.export(body, '{stl_path_fwd}', exportType=cq.exporters.ExportTypes.STL)
+print('OK')
+"""
+        script_path = os.path.join(TEMP_DIR, f"{job_id}_part{i}.py")
+        with open(script_path, "w") as f:
+            f.write(script)
+        
+        try:
+            proc = subprocess.run(
+                [CADQUERY_PYTHON, script_path],
+                capture_output=True, text=True, timeout=30, cwd=TEMP_DIR
+            )
+            stl_check = os.path.join(TEMP_DIR, f"{job_id}_part{i}.stl")
+            if proc.returncode == 0 and os.path.exists(stl_check):
+                individual_parts.append({
+                    "name": f"{template_name}_{i}",
+                    "template": template_name,
+                    "index": i,
+                    "stl_url": f"/part-stl/{job_id}/{i}",
+                    "position": pos,
+                    "rotation": part_def.get("rotation", {"axis": "Z", "angle": 0})
+                })
+            else:
+                print(f"Part {i} export failed: {proc.stderr[:200]}")
+        except Exception as e:
+            print(f"Part {i} subprocess failed: {e}")
+    
+    jobs[job_id]["individual_parts"] = individual_parts
+
+
+@app.route("/assembly/parts/<job_id>")
+def get_assembly_parts(job_id):
+    """Get list of individual parts in an assembly for gizmo selection."""
+    job = jobs.get(job_id, {})
+    return jsonify({"parts": job.get("individual_parts", [])})
+
+
+@app.route("/part-stl/<job_id>/<int:part_index>")
+def serve_part_stl(job_id, part_index):
+    """Serve individual part STL for gizmo-based assembly manipulation."""
+    stl_path = os.path.join(TEMP_DIR, f"{job_id}_part{part_index}.stl")
+    if not os.path.exists(stl_path):
+        return jsonify({"error": "Not found"}), 404
+    return send_file(stl_path, mimetype='application/octet-stream')
+
 
 @app.route("/assembly/script/<job_id>")
 def get_assembly_script(job_id):
@@ -1045,6 +1146,37 @@ def canvas_update_param():
     return jsonify({"job_id": job_id})
 
 
+@app.route("/canvas/update-params", methods=["POST"])
+def canvas_update_params():
+    """Update multiple parameters in a single block simultaneously."""
+    data = request.get_json(force=True)
+    session_id = data["session_id"]
+    block_id = data["block_id"]
+    updates = data["updates"]
+
+    session = canvas_sessions.get(session_id)
+    if not session:
+        return jsonify({"error": "Session not found"}), 404
+
+    new_script = update_block_params(session["script"], block_id, updates)
+
+    # Save to history
+    session["history"] = session["history"][:session["history_index"] + 1]
+    session["history"].append(new_script)
+    session["history_index"] += 1
+    session["script"] = new_script
+
+    # Execute
+    job_id = _new_job(f"{session_id}_update_multi")
+    jobs[job_id]["script"] = new_script
+    threading.Thread(
+        target=lambda: _run_canvas_job(job_id, new_script),
+        daemon=True
+    ).start()
+
+    return jsonify({"job_id": job_id})
+
+
 @app.route("/canvas/add-block", methods=["POST"])
 def canvas_add_block():
     """Add new geometry block to existing assembly."""
@@ -1116,6 +1248,13 @@ def _run_canvas_job(job_id, script):
         jobs[job_id]["step_file"] = os.path.join(TEMP_DIR, f"{job_id}.step")
         stl_path = os.path.join(TEMP_DIR, f"{job_id}.stl")
         jobs[job_id]["stl_file"] = stl_path if os.path.exists(stl_path) else None
+        
+        # Check for individual parts
+        part_count = 0
+        while os.path.exists(os.path.join(TEMP_DIR, f"{job_id}_part{part_count}.stl")):
+            part_count += 1
+        jobs[job_id]["part_count"] = part_count
+        
         _log(job_id, "complete", "done", "Canvas model updated")
     else:
         jobs[job_id]["status"] = "failed"

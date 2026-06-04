@@ -1162,5 +1162,3 @@ html, body {
   border-color: var(--accent-hover);
   color: #fff;
 }
-
-.assembly-part-row { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; background: var(--bg-hover); padding: 8px; position: relative; border-left: 2px solid transparent; cursor: pointer; transition: all 0.15s ease; } .assembly-part-row:hover { background: rgba(255, 255, 255, 0.05); } .assembly-part-row.selected { border-left-color: var(--accent); background: rgba(0, 120, 212, 0.1); } .part-pos-row { display: flex; align-items: center; gap: 4px; margin-top: 4px; }

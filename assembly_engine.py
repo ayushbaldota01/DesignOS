@@ -54,22 +54,11 @@ def assemble_parts(parts_list):
             
         # Create Location object for positioning
         vec = cq.Vector(float(pos.get("x",0)), float(pos.get("y",0)), float(pos.get("z",0)))
-        rx = float(rot.get("rot_x", 0))
-        ry = float(rot.get("rot_y", 0))
-        rz = float(rot.get("rot_z", 0))
-        
-        if rx != 0: body = body.rotate((0,0,0), (1,0,0), rx)
-        if ry != 0: body = body.rotate((0,0,0), (0,1,0), ry)
-        if rz != 0: body = body.rotate((0,0,0), (0,0,1), rz)
-        
-        # Fallback for old single-axis logic if used manually
+        axis_name = str(rot.get("axis", "Z")).upper()
+        ax_vec = cq.Vector(*AXES.get(axis_name, (0,0,1)))
         angle = float(rot.get("angle", 0))
-        if angle != 0 and rx == 0 and ry == 0 and rz == 0:
-            axis_name = str(rot.get("axis", "Z")).upper()
-            ax_vec = cq.Vector(*AXES.get(axis_name, (0,0,1)))
-            loc = cq.Location(vec, ax_vec, angle)
-        else:
-            loc = cq.Location(vec)
+        
+        loc = cq.Location(vec, ax_vec, angle)
         
         # Add to assembly
         part_name = f"{template_name}_{i+1}"
@@ -113,26 +102,13 @@ def generate_assembly_script(parts_list):
         lines.append(f"# Part {i+1}: {t}")
         lines.append(f"part_{i+1} = BASE_TEMPLATES['{t}']({param_str})")
         
-        rx = float(rot.get("rot_x", 0))
-        ry = float(rot.get("rot_y", 0))
-        rz = float(rot.get("rot_z", 0))
-        
-        if rx != 0: lines.append(f"part_{i+1} = part_{i+1}.rotate((0,0,0), (1,0,0), {rx})")
-        if ry != 0: lines.append(f"part_{i+1} = part_{i+1}.rotate((0,0,0), (0,1,0), {ry})")
-        if rz != 0: lines.append(f"part_{i+1} = part_{i+1}.rotate((0,0,0), (0,0,1), {rz})")
-        
         vec_str = f"cq.Vector({pos.get('x',0)}, {pos.get('y',0)}, {pos.get('z',0)})"
+        axis_name = str(rot.get('axis','Z')).upper()
+        if axis_name == 'X': ax_str = "cq.Vector(1,0,0)"
+        elif axis_name == 'Y': ax_str = "cq.Vector(0,1,0)"
+        else: ax_str = "cq.Vector(0,0,1)"
         
-        angle = float(rot.get("angle", 0))
-        if angle != 0 and rx == 0 and ry == 0 and rz == 0:
-            axis_name = str(rot.get('axis','Z')).upper()
-            if axis_name == 'X': ax_str = "cq.Vector(1,0,0)"
-            elif axis_name == 'Y': ax_str = "cq.Vector(0,1,0)"
-            else: ax_str = "cq.Vector(0,0,1)"
-            loc_str = f"cq.Location({vec_str}, {ax_str}, {angle})"
-        else:
-            loc_str = f"cq.Location({vec_str})"
-            
+        loc_str = f"cq.Location({vec_str}, {ax_str}, {rot.get('angle',0)})"
         color_str = colors_list[i % len(colors_list)]
         
         lines.append(f"result.add(part_{i+1}, name='{t}_{i+1}', loc={loc_str}, color={color_str})")

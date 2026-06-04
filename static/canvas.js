@@ -133,6 +133,95 @@ window.disableGizmo = function() {
     }
 };
 
+window.activateFaceMateFromPanel = function() {
+    if (canvas.selectedBlockId) {
+        window.activateFaceMate('part_' + canvas.selectedBlockId);
+    } else {
+        showToast('Select a part from the Assembly Tree first');
+    }
+};
+
+window.activateFaceMate = function(partName) {
+    if (!window.viewerInstance) return;
+    
+    // Select the part first
+    if (window.viewerInstance.selectPart) {
+        window.viewerInstance.selectPart(partName);
+    }
+    
+    // Start face mate mode
+    window.viewerInstance.startFaceMateMode();
+    
+    // Update UI
+    showToast('Step 1: Click a face on ' + partName);
+    addChatMsg('system', `Face mate: click source face on ${partName}`);
+    
+    // Show cancel button
+    const mateCancelBtn = document.getElementById('mateCancelBtn');
+    const mateStatusBar = document.getElementById('mateStatusBar');
+    const mateStatus = document.getElementById('mateStatus');
+    if (mateCancelBtn) mateCancelBtn.style.display = 'block';
+    if (mateStatusBar) mateStatusBar.style.display = 'flex';
+    if (mateStatus) mateStatus.textContent = `Step 1/2 — Click face on: ${partName}`;
+    
+    // Wire callbacks
+    window.viewerInstance.onFaceMateStep = (step, partName) => {
+        if (step === 1) {
+            if (mateStatus) mateStatus.textContent = `Step 2/2 — Click target face on another part`;
+            addChatMsg('system', 'Source face selected — click target face');
+        } else if (step === 2) {
+            if (mateStatus) mateStatus.textContent = 'Mate complete';
+            if (mateStatusBar) mateStatusBar.style.display = 'none';
+            if (mateCancelBtn) mateCancelBtn.style.display = 'none';
+            addChatMsg('success', `Mated to ${partName}`);
+        } else if (step === -1) {
+            if (mateStatus) mateStatus.textContent = `Error: ${partName} — try again`;
+            addChatMsg('error', partName);
+        }
+    };
+    
+    window.viewerInstance.onMateComplete = ({sourcePart, position, rotation}) => {
+        // Frontend-only mate — don't sync to backend (would trigger SSE reload and duplicates)
+        addChatMsg('success', `${sourcePart} mated successfully`);
+    };
+};
+
+window.cancelFaceMate = function() {
+    if (window.viewerInstance) window.viewerInstance.stopFaceMateMode();
+    const mateStatusBar = document.getElementById('mateStatusBar');
+    const mateCancelBtn = document.getElementById('mateCancelBtn');
+    if (mateStatusBar) mateStatusBar.style.display = 'none';
+    if (mateCancelBtn) mateCancelBtn.style.display = 'none';
+    addChatMsg('system', 'Face mate cancelled');
+};
+
+window.setMateOffset = function(partName, offsetMm) {
+    const mesh = window.viewerInstance?.partMeshes?.[partName];
+    if (!mesh || !window.viewerInstance?.faceMateSource) return;
+    const normal = window.viewerInstance.faceMateSource.normal.clone();
+    
+    // Apply visual offset
+    mesh.position.addScaledVector(normal, parseFloat(offsetMm));
+    
+    // Send updated position to backend
+    const blockId = partName.replace('part_', '');
+    if (!blockId || !canvas.sessionId) return;
+    
+    fetch('/canvas/update-params', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+            session_id: canvas.sessionId,
+            block_id: blockId,
+            updates: {
+                x: mesh.position.x,
+                y: mesh.position.z, // Y/Z swap
+                z: mesh.position.y
+            }
+        })
+    }).catch(err => console.error(err));
+};
+
 window.closeModal = function() {
   document.getElementById('modalBackdrop').classList.remove('visible');
 };
@@ -446,6 +535,29 @@ function renderPropsPanel(block) {
       <button class="btn-app" style="width:100%;" onclick="quickAddFeature('pockets')">▽ Add Pocket</button>
       <button class="btn-app" style="width:100%;" onclick="quickAddFeature('boss')">⬆ Add Boss</button>
       <button class="btn-app" style="width:100%;" onclick="quickAddFeature('shell')">◻ Shell</button>`;
+      
+    // Face Mate UI for base parts
+    const partName = 'part_' + block.id;
+    html += `
+      <div class="prop-row" style="margin-top:12px">
+          <span class="prop-label" style="font-size:9px;color:var(--text-dim)">FACE MATE</span>
+      </div>
+      <div style="font-size:10px;color:var(--text-dim);padding:4px 0;line-height:1.4">
+          1. Click "Mate Faces"<br>
+          2. Click a face on this part<br>  
+          3. Click target face on another part
+      </div>
+      <button onclick="activateFaceMate('${partName}')" 
+              class="tool-btn" style="width:100%;margin-top:6px">
+          ⊕ Mate Faces
+      </button>
+      <div style="margin-top:6px;display:flex;gap:4px;align-items:center">
+          <span style="font-size:10px;color:var(--text-dim)">Offset</span>
+          <input type="number" value="0" step="0.5" style="width:60px" 
+                 class="prop-input"
+                 onchange="setMateOffset('${partName}', this.value)">
+          <span style="font-size:10px;color:var(--text-dim)">mm</span>
+      </div>`;
   }
   html += `</div>`;
 
@@ -576,40 +688,19 @@ window.setupFaceSelection = function(viewer) {
           // Block engine (id is like 001, 002)
           showGenOverlay('Updating position...');
           
-          // Send 3 separate param updates for position
-          const px = Math.round(position.x * 10) / 10;
-          const py = Math.round(position.y * 10) / 10;
-          const pz = Math.round(position.z * 10) / 10;
+          // Send a single batched update for position and rotation
+          const updates = {
+              x: Math.round(position.x * 10) / 10,
+              y: Math.round(position.y * 10) / 10,
+              z: Math.round(position.z * 10) / 10,
+              rot_x: Math.round(rotation.x * (180 / Math.PI)),
+              rot_y: Math.round(rotation.y * (180 / Math.PI)),
+              rot_z: Math.round(rotation.z * (180 / Math.PI))
+          };
           
-          await fetch('/canvas/update-param', {
+          const res = await fetch('/canvas/update-params', {
               method: 'POST', headers: {'Content-Type': 'application/json'},
-              body: JSON.stringify({session_id: canvas.sessionId, block_id: partId, param_key: 'x', new_value: px})
-          });
-          await fetch('/canvas/update-param', {
-              method: 'POST', headers: {'Content-Type': 'application/json'},
-              body: JSON.stringify({session_id: canvas.sessionId, block_id: partId, param_key: 'y', new_value: py})
-          });
-          await fetch('/canvas/update-param', {
-              method: 'POST', headers: {'Content-Type': 'application/json'},
-              body: JSON.stringify({session_id: canvas.sessionId, block_id: partId, param_key: 'z', new_value: pz})
-          });
-
-          // Send 3 param updates for rotation (in degrees)
-          const rx = Math.round(rotation.x * (180 / Math.PI));
-          const ry = Math.round(rotation.y * (180 / Math.PI));
-          const rz = Math.round(rotation.z * (180 / Math.PI));
-
-          await fetch('/canvas/update-param', {
-              method: 'POST', headers: {'Content-Type': 'application/json'},
-              body: JSON.stringify({session_id: canvas.sessionId, block_id: partId, param_key: 'rot_x', new_value: rx})
-          });
-          await fetch('/canvas/update-param', {
-              method: 'POST', headers: {'Content-Type': 'application/json'},
-              body: JSON.stringify({session_id: canvas.sessionId, block_id: partId, param_key: 'rot_y', new_value: ry})
-          });
-          const res = await fetch('/canvas/update-param', {
-              method: 'POST', headers: {'Content-Type': 'application/json'},
-              body: JSON.stringify({session_id: canvas.sessionId, block_id: partId, param_key: 'rot_z', new_value: rz})
+              body: JSON.stringify({session_id: canvas.sessionId, block_id: partId, updates: updates})
           });
 
           const data = await res.json();
@@ -809,7 +900,19 @@ function connectSSE(jobId) {
         updateStatus('Ready');
         addChatMsg('success', 'Model updated');
         if (window.viewerInstance && entry.has_stl_file !== false) {
-          window.viewerInstance.loadSTL(`/model/${jobId}`);
+          if (entry.part_count > 0) {
+              const partsData = [];
+              for (let i = 0; i < entry.part_count; i++) {
+                  partsData.push({
+                      name: `part_${(i+1).toString().padStart(3, '0')}`,
+                      stl_url: `/part-stl/${jobId}/${i}`,
+                      template: 'part'
+                  });
+              }
+              window.viewerInstance.loadAssemblyParts(partsData);
+          } else {
+              window.viewerInstance.loadSTL(`/model/${jobId}`);
+          }
         }
         saveToHistory();
       }
@@ -1423,83 +1526,7 @@ function executeJobPromise(jobId) {
 // Assembly Mates
 // ═══════════════════════════════════════════════════════════════
 
-window.showMateDialog = function() {
-  if (!canvas.sessionId) { showToast('Generate a part first'); return; }
-  const modal = document.getElementById('modalContent');
-  
-  const baseBlocks = canvas.blocks.filter(b => !['holes', 'fillets', 'chamfers', 'pockets', 'boss', 'shell', 'smart_fillet', 'flange_holes', 'mate'].includes(b.type));
-  if (baseBlocks.length < 2) { showToast('Need at least 2 parts to add a mate'); return; }
-  
-  let options = baseBlocks.map(b => `<option value="part_${b.id}">part_${b.id} (${b.type})</option>`).join('');
-  
-  let html = `<div class="modal-title">Add Assembly Mate</div>
-    <label>Part 1 <select id="mate_part1">${options}</select></label>
-    <label>Face 1 <input type="text" id="mate_face1" value=">Z" placeholder="e.g. >Z, <Z"></label>
-    <label>Part 2 <select id="mate_part2">${options}</select></label>
-    <label>Face 2 <input type="text" id="mate_face2" value="<Z" placeholder="e.g. <Z"></label>
-    <label>Type <select id="mate_type"><option>Plane</option><option>Axis</option><option>Point</option></select></label>
-    <div class="modal-actions">
-      <button class="btn-app" onclick="closeModal()">Cancel</button>
-      <button class="btn-app-primary" onclick="applyMate()">Add Mate</button>
-    </div>`;
-  modal.innerHTML = html;
-  document.getElementById('modalBackdrop').classList.add('visible');
-};
-
-window.applyMate = async function() {
-  const params = {
-    part1: document.getElementById('mate_part1').value,
-    face1: document.getElementById('mate_face1').value,
-    part2: document.getElementById('mate_part2').value,
-    face2: document.getElementById('mate_face2').value,
-    type: document.getElementById('mate_type').value
-  };
-  
-  closeModal();
-  showGenOverlay('Applying Mate...');
-  
-  try {
-    const res = await fetch('/canvas/add-block', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({
-        session_id: canvas.sessionId, block_type: 'mate', params, parent_id: '001', face: ''
-      })
-    });
-    const data = await res.json();
-    if (data.error) throw new Error(data.error);
-    if (data.job_id) {
-      canvas.currentJobId = data.job_id;
-      await executeJobPromise(data.job_id);
-      await loadBlocks();
-      renderMatesList();
-    }
-  } catch (err) { hideGenOverlay(); showToast('Mate failed: ' + err.message); }
-};
-
-function renderMatesList() {
-  const list = document.getElementById('matesList');
-  if (!list) return;
-  const mates = canvas.blocks.filter(b => b.type === 'mate');
-  if (mates.length === 0) {
-    list.innerHTML = '<div style="padding:12px;color:var(--text-dim);font-size:11px;">No mates defined</div>';
-    return;
-  }
-  list.innerHTML = mates.map(m => {
-    return `<div class="tree-node" style="border-left: 2px solid #ff8c00;">
-      <span class="tree-node-icon">🔗</span>
-      <span class="tree-node-label">[b${m.id}] ${m.params.type}</span>
-      <span class="tree-node-dims">${m.params.part1} ↔ ${m.params.part2}</span>
-    </div>`;
-  }).join('');
-}
-
-// Hook into loadBlocks to render mates
-const originalLoadBlocks = loadBlocks;
-loadBlocks = async function() {
-  await originalLoadBlocks();
-  renderMatesList();
-};
+// ── ASSEMBLY ENGINE ────────────────────────────────────────────
 
 // ── ASSEMBLY ENGINE ────────────────────────────────────────────
 

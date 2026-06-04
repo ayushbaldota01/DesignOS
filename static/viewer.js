@@ -37,6 +37,18 @@ export class CADViewer {
     this.gizmoEnabled = false;
     this.gizmoMode = "translate"; // translate, rotate
 
+    // Assembly part meshes for individual selection
+    this.partMeshes = {};        // name → THREE.Mesh
+    this.selectedPartName = null;
+    this.onPartSelect = null;    // callback(partName, mesh)
+
+    this.faceMateMode = false;
+    this.faceMateStep = 1;
+    this.faceMateSource = null;
+    this.onFaceMateStep = null;
+    this.onMateComplete = null;
+    this._faceHighlight = null;
+
     this._init();
   }
 
@@ -172,32 +184,229 @@ export class CADViewer {
       this.transformControls.setMode(mode);
   }
 
-  attachGizmoToPart(partName) {
-      if (!this.currentModel) return;
-      
-      // If null is passed, detach
-      if (!partName) {
-          this.transformControls.detach();
-          return;
-      }
+  /* ─── Face Mating ─── */
+  
+  startFaceMateMode() {
+      this.faceMateMode = true;
+      this.faceMateStep = 1; // 1=pick source face, 2=pick target face
+      this.faceMateSource = null;
+      this.renderer.domElement.style.cursor = 'crosshair';
+      console.log('Face mate: click source face');
+  }
 
-      let targetObj = null;
-      this.currentModel.traverse((child) => {
-          if (child.name === partName) {
-              targetObj = child;
-          }
-      });
-
-      if (targetObj) {
-          this.gizmoEnabled = true;
-          this.transformControls.attach(targetObj);
-      } else {
-          this.transformControls.detach();
+  stopFaceMateMode() {
+      this.faceMateMode = false;
+      this.faceMateStep = 1;
+      this.faceMateSource = null;
+      this.renderer.domElement.style.cursor = 'default';
+      if (this._faceHighlight) {
+          this.scene.remove(this._faceHighlight);
+          this._faceHighlight = null;
       }
   }
 
-  loadGLTF(url, preserveCamera = false) {
-      const attachedPartName = this.transformControls.object ? this.transformControls.object.name : null;
+  _getFaceInfo(hit) {
+      const mesh = hit.object;
+      const face = hit.face;
+      
+      const normal = face.normal.clone()
+          .transformDirection(mesh.matrixWorld)
+          .normalize();
+      
+      const pos = mesh.geometry.attributes.position;
+      const v0 = new THREE.Vector3().fromBufferAttribute(pos, face.a).applyMatrix4(mesh.matrixWorld);
+      const v1 = new THREE.Vector3().fromBufferAttribute(pos, face.b).applyMatrix4(mesh.matrixWorld);
+      const v2 = new THREE.Vector3().fromBufferAttribute(pos, face.c).applyMatrix4(mesh.matrixWorld);
+      const center = v0.add(v1).add(v2).divideScalar(3);
+      
+      return { mesh, normal, center };
+  }
+
+  _highlightFace(faceInfo) {
+      if (this._faceHighlight) this.scene.remove(this._faceHighlight);
+      
+      const arrow = new THREE.ArrowHelper(
+          faceInfo.normal,
+          faceInfo.center,
+          20,
+          0x0078d4,
+          5, 3
+      );
+      this._faceHighlight = arrow;
+      this.scene.add(arrow);
+  }
+
+  mateFaces(sourceInfo, targetInfo) {
+      const meshA = sourceInfo.mesh;
+      const normalA = sourceInfo.normal.clone();
+      const centerA = sourceInfo.center.clone();
+      const normalB = targetInfo.normal.clone();
+      const centerB = targetInfo.center.clone();
+      
+      const targetNormal = normalB.clone().negate();
+      
+      const quaternion = new THREE.Quaternion()
+          .setFromUnitVectors(normalA, targetNormal);
+      
+      meshA.quaternion.premultiply(quaternion);
+      meshA.updateMatrixWorld(true);
+      
+      const meshCenter = meshA.position.clone();
+      const originalOffset = centerA.clone().sub(meshCenter);
+      const rotatedOffset = originalOffset.clone().applyQuaternion(quaternion);
+      const newFaceCenter = meshA.position.clone().add(rotatedOffset);
+      
+      const translation = centerB.clone().sub(newFaceCenter);
+      meshA.position.add(translation);
+      
+      meshA.updateMatrixWorld(true);
+      
+      if (this.onMateComplete) {
+          this.onMateComplete({
+              sourcePart: meshA.name,
+              position: meshA.position,
+              rotation: meshA.rotation
+          });
+      }
+  }
+
+  /* ─── Assembly Part Loading ─── */
+
+  loadAssemblyParts(partsData) {
+    // Clear existing part meshes
+    Object.values(this.partMeshes).forEach(m => {
+      this.scene.remove(m);
+      m.geometry.dispose();
+      m.material.dispose();
+    });
+    this.partMeshes = {};
+    this.transformControls.detach();
+    this.selectedPartName = null;
+
+    // Also remove the combined model if present
+    if (this.currentModel) {
+      this.scene.remove(this.currentModel);
+      if (this.currentModel.geometry) this.currentModel.geometry.dispose();
+      if (this.currentModel.material) this.currentModel.material.dispose();
+      this.currentModel = null;
+    }
+
+    const loader = new STLLoader();
+    const PART_COLORS = [0x6a9fd8, 0x7ab8a0, 0xd4956a, 0x9b7ab8, 0xb8a07a, 0x7ab8b8, 0xd47a7a];
+    let loadedCount = 0;
+    const total = partsData.length;
+
+    partsData.forEach((partDef, i) => {
+      loader.load(partDef.stl_url, (geometry) => {
+        geometry.computeVertexNormals();
+        const mat = new THREE.MeshStandardMaterial({
+          color: PART_COLORS[i % PART_COLORS.length],
+          metalness: 0.3, roughness: 0.5,
+          emissive: new THREE.Color(0x000000),
+          emissiveIntensity: 0
+        });
+        const mesh = new THREE.Mesh(geometry, mat);
+        mesh.name = partDef.name;
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
+
+        // Store original assembly position for reset
+        // Note: STL already has the part baked at its translated position from CadQuery export
+        mesh.userData.originalPosition = mesh.position.clone();
+        mesh.userData.originalRotation = mesh.rotation.clone();
+        mesh.userData.template = partDef.template;
+        mesh.userData.partIndex = i;
+
+        this.partMeshes[partDef.name] = mesh;
+        this.scene.add(mesh);
+
+        loadedCount++;
+        if (loadedCount === total) {
+          this._fitCameraToAssembly();
+        }
+      }, undefined, (err) => {
+        console.error(`Part ${partDef.name} load failed:`, err);
+        loadedCount++;
+        if (loadedCount === total) this._fitCameraToAssembly();
+      });
+    });
+  }
+
+  _fitCameraToAssembly() {
+    const box = new THREE.Box3();
+    Object.values(this.partMeshes).forEach(m => box.expandByObject(m));
+    if (box.isEmpty()) return;
+    const size = new THREE.Vector3();
+    box.getSize(size);
+    const center = new THREE.Vector3();
+    box.getCenter(center);
+    const maxDim = Math.max(size.x, size.y, size.z) || 200;
+    const dist = maxDim * 2.5;
+    this.camera.position.set(center.x + dist, center.y + dist * 0.8, center.z + dist);
+    this.controls.target.copy(center);
+    this.controls.update();
+  }
+
+  selectPart(partName) {
+    // Deselect all
+    Object.values(this.partMeshes).forEach(m => {
+      m.material.emissive.set(0x000000);
+      m.material.emissiveIntensity = 0;
+    });
+
+    if (!partName) {
+      this.transformControls.detach();
+      this.selectedPartName = null;
+      return;
+    }
+
+    const mesh = this.partMeshes[partName];
+    if (!mesh) {
+      console.warn('selectPart: not found:', partName, 'available:', Object.keys(this.partMeshes));
+      return;
+    }
+
+    // Highlight
+    mesh.material.emissive.setHex(0x1a3a5a);
+    mesh.material.emissiveIntensity = 0.5;
+
+    // Attach gizmo
+    this.transformControls.attach(mesh);
+    this.transformControls.setMode(this.gizmoMode || 'translate');
+    this.selectedPartName = partName;
+
+    if (this.onPartSelect) this.onPartSelect(partName, mesh);
+  }
+
+  getPartTransforms() {
+    const out = {};
+    Object.entries(this.partMeshes).forEach(([name, mesh]) => {
+      out[name] = {
+        position: { x: mesh.position.x, y: mesh.position.y, z: mesh.position.z },
+        rotation: {
+          x: THREE.MathUtils.radToDeg(mesh.rotation.x),
+          y: THREE.MathUtils.radToDeg(mesh.rotation.y),
+          z: THREE.MathUtils.radToDeg(mesh.rotation.z)
+        }
+      };
+    });
+    return out;
+  }
+
+  resetPartPositions() {
+    Object.values(this.partMeshes).forEach(m => {
+      if (m.userData.originalPosition) {
+        m.position.copy(m.userData.originalPosition);
+      }
+      if (m.userData.originalRotation) {
+        m.rotation.copy(m.userData.originalRotation);
+      }
+    });
+    this.transformControls.detach();
+    this.selectedPartName = null;
+  }
+
+  loadGLTF(url) {
       this.clear();
       const loader = new GLTFLoader();
       loader.load(url, (gltf) => {
@@ -229,16 +438,10 @@ export class CADViewer {
           this.currentModel = model;
           this.scene.add(model);
 
-          if (!preserveCamera) {
-              const dist = maxDim * 2.0;
-              this.camera.position.set(dist, dist * 0.8, dist);
-              this.controls.target.copy(box.getCenter(new THREE.Vector3()));
-              this.controls.update();
-          }
-
-          if (attachedPartName && this.gizmoEnabled) {
-              this.attachGizmoToPart(attachedPartName);
-          }
+          const dist = maxDim * 2.0;
+          this.camera.position.set(dist, dist * 0.8, dist);
+          this.controls.target.copy(box.getCenter(new THREE.Vector3()));
+          this.controls.update();
 
       }, undefined, (err) => console.error("GLTF load error:", err));
   }
@@ -351,24 +554,69 @@ export class CADViewer {
   }
 
   _onClick(e) {
-    if (!this.currentModel) return;
-
-    const rect = this.renderer.domElement.getBoundingClientRect();
-    this._mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
-    this._mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
-
+    this._updateMouse(e);
     this._raycaster.setFromCamera(this._mouse, this.camera);
     
-    // Check intersection with the model
-    let intersects = [];
-    if (this.currentModel.isGroup) {
-        intersects = this._raycaster.intersectObjects(this.currentModel.children, true);
-    } else {
-        intersects = this._raycaster.intersectObject(this.currentModel, false);
+    // FACE MATE MODE
+    if (this.faceMateMode) {
+        const allMeshes = Object.values(this.partMeshes);
+        if (allMeshes.length === 0) return;
+        
+        const hits = this._raycaster.intersectObjects(allMeshes, false);
+        if (hits.length === 0) return;
+        
+        const faceInfo = this._getFaceInfo(hits[0]);
+        this._highlightFace(faceInfo);
+        
+        if (this.faceMateStep === 1) {
+            this.faceMateSource = faceInfo;
+            this.faceMateStep = 2;
+            if (this.onFaceMateStep) this.onFaceMateStep(1, faceInfo.mesh.name);
+        } else if (this.faceMateStep === 2) {
+            if (faceInfo.mesh === this.faceMateSource.mesh) {
+                if (this.onFaceMateStep) this.onFaceMateStep(-1, 'Same part — click a face on a different part');
+                return;
+            }
+            this.mateFaces(this.faceMateSource, faceInfo);
+            this.stopFaceMateMode();
+            if (this.onFaceMateStep) this.onFaceMateStep(2, faceInfo.mesh.name);
+        }
+        return;
     }
+
+    let targetObjects = [];
+    if (Object.keys(this.partMeshes).length > 0) {
+        targetObjects = Object.values(this.partMeshes);
+    } else if (this.currentModel) {
+        if (this.currentModel.isGroup) {
+            targetObjects = this.currentModel.children;
+        } else {
+            targetObjects = [this.currentModel];
+        }
+    }
+
+    if (targetObjects.length === 0) {
+        if (this.gizmoEnabled) this.selectPart(null);
+        this.clearFaceSelection();
+        if (this.onFaceSelect) this.onFaceSelect(null);
+        return;
+    }
+
+    const intersects = this._raycaster.intersectObjects(targetObjects, true);
 
     if (intersects.length > 0) {
       const isect = intersects[0];
+      
+      // If Gizmo mode is on, attach it and skip face selection!
+      if (this.gizmoEnabled && isect.object.isMesh) {
+          if (Object.keys(this.partMeshes).length > 0) {
+              this.selectPart(isect.object.name);
+          } else {
+              this.transformControls.attach(isect.object);
+          }
+          this.clearFaceSelection();
+          return;
+      }
       
       const hit = isect;
       const normal = hit.face.normal.clone().transformDirection(hit.object.matrixWorld).normalize();
@@ -563,5 +811,13 @@ export class CADViewer {
     hGeo.setAttribute('position', new THREE.Float32BufferAttribute(newPos, 3));
     hGeo.computeVertexNormals();
     return hGeo;
+  }
+
+  /* ─── Helpers ─── */
+
+  _updateMouse(e) {
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    this._mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+    this._mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
   }
 }
