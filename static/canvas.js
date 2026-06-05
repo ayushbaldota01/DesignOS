@@ -133,6 +133,43 @@ window.disableGizmo = function() {
     }
 };
 
+window.toggleMeasure3D = function() {
+    if (!window.viewerInstance) return;
+    const btn = event.currentTarget;
+    const isMeasuring = window.viewerInstance.measureMode;
+    const resSpan = document.getElementById('measure3DResult');
+    
+    if (isMeasuring) {
+        window.viewerInstance.stopMeasureMode();
+        btn.classList.remove('active');
+        if (resSpan) resSpan.style.display = 'none';
+        showToast('3D Measure mode disabled');
+    } else {
+        window.disableGizmo();
+        window.viewerInstance.startMeasureMode();
+        btn.classList.add('active');
+        if (resSpan) {
+            resSpan.style.display = 'inline';
+            resSpan.textContent = 'Click start point...';
+        }
+        showToast('3D Measure mode enabled. Click to pick start and end points.');
+        
+        window.viewerInstance.onMeasureUpdate = function(data) {
+            if (!resSpan) return;
+            if (!data) {
+                resSpan.style.display = 'none';
+            } else if (data.start) {
+                resSpan.textContent = 'Click end point...';
+            } else if (data.complete) {
+                // Done with one measurement, ready for next
+            } else {
+                // Moving - update text
+                resSpan.textContent = `Dist: ${data.dist.toFixed(2)}mm (dx:${data.dx.toFixed(2)} dy:${data.dy.toFixed(2)} dz:${data.dz.toFixed(2)})`;
+            }
+        };
+    }
+};
+
 window.activateFaceMateFromPanel = function() {
     if (canvas.selectedBlockId) {
         window.activateFaceMate('part_' + canvas.selectedBlockId);
