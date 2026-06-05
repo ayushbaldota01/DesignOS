@@ -49,13 +49,11 @@ export class CADViewer {
     this.onMateComplete = null;
     this._faceHighlight = null;
 
-    // Measurement Mode
+    // Measurement
     this.measureMode = false;
-    this.measureStep = 1;
-    this.measureStartPt = null;
+    this.measurePoints = [];
     this._measureLine = null;
-    this._measurePoints = null;
-    this.onMeasureUpdate = null;
+    this._measureLabels = [];
 
     this._init();
   }
@@ -192,6 +190,51 @@ export class CADViewer {
       this.transformControls.setMode(mode);
   }
 
+  /* ─── Measurement ─── */
+
+  toggleMeasureMode() {
+      this.measureMode = !this.measureMode;
+      this.measurePoints = [];
+      this._clearMeasureVisuals();
+
+      const btn = document.getElementById('btnMeasure3D');
+      if (this.measureMode) {
+          if (btn) btn.classList.add('active');
+          this.renderer.domElement.style.cursor = 'crosshair';
+          if (window.showToast) window.showToast('Measure: Click two points on the model');
+      } else {
+          if (btn) btn.classList.remove('active');
+          this.renderer.domElement.style.cursor = 'default';
+      }
+  }
+
+  _clearMeasureVisuals() {
+      if (this._measureLine) { this.scene.remove(this._measureLine); this._measureLine = null; }
+      if (this._measureLabels) { this._measureLabels.forEach(l => this.scene.remove(l)); this._measureLabels = []; }
+  }
+
+  _createMeasureSprite(text) {
+      const c = document.createElement('canvas');
+      const ctx = c.getContext('2d');
+      ctx.font = '24px monospace';
+      const width = ctx.measureText(text).width;
+      c.width = width + 30;
+      c.height = 40;
+      ctx.fillStyle = 'rgba(20, 20, 20, 0.8)';
+      ctx.fillRect(0, 0, c.width, c.height);
+      ctx.strokeStyle = '#e6a23c';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(0, 0, c.width, c.height);
+      ctx.fillStyle = '#e6a23c';
+      ctx.font = 'bold 20px monospace';
+      ctx.fillText(text, 15, 28);
+      const tex = new THREE.CanvasTexture(c);
+      const mat = new THREE.SpriteMaterial({ map: tex, depthTest: false });
+      const sprite = new THREE.Sprite(mat);
+      sprite.scale.set(c.width * 0.15, c.height * 0.15, 1);
+      return sprite;
+  }
+
   /* ─── Face Mating ─── */
   
   startFaceMateMode() {
@@ -275,56 +318,6 @@ export class CADViewer {
               position: meshA.position,
               rotation: meshA.rotation
           });
-      }
-  }
-
-  /* ─── 3D Measure Mode ─── */
-  startMeasureMode() {
-      this.measureMode = true;
-      this.measureStep = 1;
-      this.measureStartPt = null;
-      this.renderer.domElement.style.cursor = 'crosshair';
-      if (this._measureLine) { this.scene.remove(this._measureLine); this._measureLine = null; }
-      if (this._measurePoints) { this.scene.remove(this._measurePoints); this._measurePoints = null; }
-      if (this.onMeasureUpdate) this.onMeasureUpdate(null);
-  }
-
-  stopMeasureMode() {
-      this.measureMode = false;
-      this.measureStep = 1;
-      this.renderer.domElement.style.cursor = 'default';
-      if (this._measureLine) { this.scene.remove(this._measureLine); this._measureLine = null; }
-      if (this._measurePoints) { this.scene.remove(this._measurePoints); this._measurePoints = null; }
-      if (this.onMeasureUpdate) this.onMeasureUpdate(null);
-  }
-
-  _updateMeasurePreview(endPt) {
-      if (this.measureStep !== 2 || !this.measureStartPt) return;
-      
-      if (!this._measureLine) {
-          const mat = new THREE.LineBasicMaterial({ color: 0xe6a23c, depthTest: false });
-          const geo = new THREE.BufferGeometry().setFromPoints([this.measureStartPt, endPt]);
-          this._measureLine = new THREE.Line(geo, mat);
-          this._measureLine.renderOrder = 999;
-          this.scene.add(this._measureLine);
-          
-          const pMat = new THREE.PointsMaterial({ color: 0xe6a23c, size: 4, sizeAttenuation: false, depthTest: false });
-          const pGeo = new THREE.BufferGeometry().setFromPoints([this.measureStartPt, endPt]);
-          this._measurePoints = new THREE.Points(pGeo, pMat);
-          this._measurePoints.renderOrder = 999;
-          this.scene.add(this._measurePoints);
-      } else {
-          this._measureLine.geometry.setFromPoints([this.measureStartPt, endPt]);
-          this._measurePoints.geometry.setFromPoints([this.measureStartPt, endPt]);
-      }
-      
-      const dx = Math.abs(endPt.x - this.measureStartPt.x);
-      const dy = Math.abs(endPt.y - this.measureStartPt.y);
-      const dz = Math.abs(endPt.z - this.measureStartPt.z);
-      const dist = this.measureStartPt.distanceTo(endPt);
-      
-      if (this.onMeasureUpdate) {
-          this.onMeasureUpdate({ dist, dx, dy, dz });
       }
   }
 
@@ -644,23 +637,60 @@ export class CADViewer {
 
     // MEASURE MODE
     if (this.measureMode) {
-        const allMeshes = Object.values(this.partMeshes);
-        let targetObjects = allMeshes.length > 0 ? allMeshes : (this.currentModel ? (this.currentModel.isGroup ? this.currentModel.children : [this.currentModel]) : []);
-        if (targetObjects.length === 0) return;
+        let targetObjects = [];
+        if (Object.keys(this.partMeshes).length > 0) {
+            targetObjects = Object.values(this.partMeshes);
+        } else if (this.currentModel) {
+            targetObjects = this.currentModel.isGroup ? this.currentModel.children : [this.currentModel];
+        }
 
         const hits = this._raycaster.intersectObjects(targetObjects, true);
-        if (hits.length === 0) return;
+        let pt = null;
+        if (hits.length > 0) {
+            pt = hits[0].point;
+        } else {
+            const tempPt = new THREE.Vector3();
+            this._raycaster.ray.intersectPlane(this._groundPlane, tempPt);
+            if (tempPt) pt = tempPt;
+        }
 
-        const hitPt = hits[0].point;
+        if (pt) {
+            if (this.measurePoints.length >= 2) {
+                this.measurePoints = [];
+                this._clearMeasureVisuals();
+            }
+            this.measurePoints.push(pt.clone());
 
-        if (this.measureStep === 1) {
-            this.measureStartPt = hitPt.clone();
-            this.measureStep = 2;
-            if (this.onMeasureUpdate) this.onMeasureUpdate({ start: true });
-        } else if (this.measureStep === 2) {
-            this._updateMeasurePreview(hitPt);
-            this.measureStep = 1; // ready for next
-            if (this.onMeasureUpdate) this.onMeasureUpdate({ complete: true });
+            // Add point marker
+            const geo = new THREE.SphereGeometry(1.5, 16, 16);
+            const mat = new THREE.MeshBasicMaterial({color: 0xe6a23c, depthTest: false});
+            const sphere = new THREE.Mesh(geo, mat);
+            sphere.position.copy(pt);
+            this.scene.add(sphere);
+            if (!this._measureLabels) this._measureLabels = [];
+            this._measureLabels.push(sphere);
+
+            if (this.measurePoints.length === 2) {
+                const p1 = this.measurePoints[0];
+                const p2 = this.measurePoints[1];
+                const distance = p1.distanceTo(p2).toFixed(2);
+                const dx = Math.abs(p1.x - p2.x).toFixed(2);
+                const dy = Math.abs(p1.y - p2.y).toFixed(2);
+                const dz = Math.abs(p1.z - p2.z).toFixed(2);
+
+                const lineGeo = new THREE.BufferGeometry().setFromPoints([p1, p2]);
+                const lineMat = new THREE.LineBasicMaterial({color: 0xe6a23c, depthTest: false});
+                this._measureLine = new THREE.Line(lineGeo, lineMat);
+                this.scene.add(this._measureLine);
+
+                const text = `Dist: ${distance}mm (dx:${dx}, dy:${dy}, dz:${dz})`;
+                const sprite = this._createMeasureSprite(text);
+                sprite.position.copy(p1).lerp(p2, 0.5);
+                this.scene.add(sprite);
+                this._measureLabels.push(sprite);
+
+                if (window.showToast) window.showToast(text);
+            }
         }
         return;
     }
@@ -754,17 +784,10 @@ export class CADViewer {
     this._raycaster.setFromCamera(this._mouse, this.camera);
 
     // Try hitting model first
-    if (this.currentModel || Object.keys(this.partMeshes).length > 0) {
-      let targetObjects = Object.values(this.partMeshes);
-      if (targetObjects.length === 0 && this.currentModel) {
-          targetObjects = this.currentModel.isGroup ? this.currentModel.children : [this.currentModel];
-      }
-      const hits = this._raycaster.intersectObjects(targetObjects, true);
+    if (this.currentModel) {
+      const hits = this._raycaster.intersectObject(this.currentModel, true);
       if (hits.length > 0) {
         const p = hits[0].point;
-        if (this.measureMode && this.measureStep === 2) {
-            this._updateMeasurePreview(p);
-        }
         this.onMouseMove3D({ x: p.x.toFixed(1), y: p.y.toFixed(1), z: p.z.toFixed(1) });
         return;
       }
@@ -773,9 +796,6 @@ export class CADViewer {
     const pt = new THREE.Vector3();
     this._raycaster.ray.intersectPlane(this._groundPlane, pt);
     if (pt) {
-      if (this.measureMode && this.measureStep === 2) {
-          this._updateMeasurePreview(pt);
-      }
       this.onMouseMove3D({ x: pt.x.toFixed(1), y: pt.y.toFixed(1), z: pt.z.toFixed(1) });
     }
   }
