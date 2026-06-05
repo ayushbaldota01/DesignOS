@@ -50,7 +50,7 @@ def _parse_params(block_type, params_raw):
         "gear":     ["diameter", "height", "x", "y", "z", "rot_x", "rot_y", "rot_z"],
         "i_beam":   ["height", "width", "length", "web_thickness", "flange_thickness", "x", "y", "z", "rot_x", "rot_y", "rot_z"],
         "two_stage_parallel_shaft": ["d1", "l1", "d2", "l2", "x", "y", "z", "rot_x", "rot_y", "rot_z"],
-        "holes":    ["hole_points", "hole_dia"],
+        "holes":    ["hole_points", "hole_dia", "depth"],
         "fillets":  ["radius"],
         "chamfers": ["size"],
         "pockets":  ["width", "length", "depth", "x", "y", "rot_z"],
@@ -167,6 +167,13 @@ def update_block_params(script: str, block_id: str, updates: dict) -> str:
     target["code_line"] = _rebuild_code_line(target["type"], old_params, target["parent"], target["id"], parent_var, target.get("face"))
     
     return rebuild_script_from_blocks(blocks)
+
+
+def delete_blocks(script: str, block_ids: list) -> str:
+    """Removes the specified blocks by ID and regenerates the script."""
+    blocks = parse_blocks(script)
+    filtered_blocks = [b for b in blocks if b["id"] not in block_ids]
+    return rebuild_script_from_blocks(filtered_blocks)
 
 
 def _rebuild_params_raw(params):

@@ -1212,6 +1212,37 @@ def canvas_add_block():
     return jsonify({"job_id": job_id})
 
 
+@app.route("/canvas/delete-blocks", methods=["POST"])
+def canvas_delete_blocks():
+    """Delete multiple blocks from the existing assembly."""
+    data = request.get_json(force=True)
+    session_id = data.get("session_id")
+    block_ids = data.get("block_ids", [])
+
+    session = canvas_sessions.get(session_id)
+    if not session:
+        return jsonify({"error": "Session not found"}), 404
+
+    from block_engine import delete_blocks
+    new_script = delete_blocks(session["script"], block_ids)
+
+    # Save history
+    session["history"] = session["history"][:session["history_index"] + 1]
+    session["history"].append(new_script)
+    session["history_index"] += 1
+    session["script"] = new_script
+
+    # Execute
+    job_id = _new_job(f"{session_id}_delete")
+    jobs[job_id]["script"] = new_script
+    threading.Thread(
+        target=lambda: _run_canvas_job(job_id, new_script),
+        daemon=True
+    ).start()
+
+    return jsonify({"job_id": job_id})
+
+
 @app.route("/canvas/undo/<session_id>", methods=["POST"])
 def canvas_undo(session_id):
     """Undo the last canvas operation."""

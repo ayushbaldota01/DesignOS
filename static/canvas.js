@@ -1148,6 +1148,58 @@ window.openSketch2d = function() {
   s2dState.faceSelector = faceStr;
   
   s2dState.elements = [];
+  s2dState.originalBlockIds = [];
+  
+  // Reload existing features on this face
+  const parentId = canvas.selectedBlockId || '001';
+  canvas.blocks.forEach(b => {
+    if (b.parent === parentId && b.face === faceStr) {
+      if (['holes', 'pockets', 'boss'].includes(b.type)) {
+        s2dState.originalBlockIds.push(b.id);
+        
+        // Reverse map coordinates
+        const mapCoords = (cqX, cqY) => {
+          let sx = cqX, sy = cqY;
+          if (faceStr === '>X') { sx = -cqY; sy = cqX; }
+          else if (faceStr === '<X') { sx = cqY; sy = -cqX; }
+          else if (faceStr === '>Y') { sx = -cqX; sy = -cqY; }
+          else if (faceStr === '<Y') { sx = cqX; sy = cqY; }
+          else if (faceStr === '<Z') { sx = -cqX; sy = -cqY; }
+          return { sx, sy };
+        };
+
+        if (b.type === 'holes' && b.params.hole_points) {
+          try {
+            const pts = JSON.parse(b.params.hole_points.replace(/'/g, '"'));
+            pts.forEach((pt, i) => {
+              const { sx, sy } = mapCoords(pt[0], pt[1]);
+              s2dState.elements.push({
+                id: b.id + '_' + i, type: 'circle', opType: 'hole',
+                x: sx, y: sy, dia: parseFloat(b.params.hole_dia) || 6.6,
+                depth: parseFloat(b.params.depth) || 10
+              });
+            });
+          } catch(e) {}
+        } else if (b.type === 'pockets') {
+           const { sx, sy } = mapCoords(parseFloat(b.params.x)||0, parseFloat(b.params.y)||0);
+           let sw = parseFloat(b.params.width) || 20;
+           let sh = parseFloat(b.params.length) || 20;
+           if (faceStr === '>X' || faceStr === '<X') { let tmp = sw; sw = sh; sh = tmp; }
+           s2dState.elements.push({
+             id: b.id, type: 'rect', opType: 'pocket',
+             x: sx, y: sy, w: sw, h: sh, depth: parseFloat(b.params.depth) || 5
+           });
+        } else if (b.type === 'boss') {
+           const { sx, sy } = mapCoords(parseFloat(b.params.x)||0, parseFloat(b.params.y)||0);
+           s2dState.elements.push({
+             id: b.id, type: 'circle', opType: 'boss',
+             x: sx, y: sy, dia: parseFloat(b.params.diameter) || 15, depth: parseFloat(b.params.height) || 5
+           });
+        }
+      }
+    }
+  });
+
   s2dState.selectedId = null;
   selectSketch2dTool('select');
   
@@ -1384,14 +1436,14 @@ function renderSketch2dSidebar() {
   `;
   if (sel.type === 'circle') {
     html += `<label>Diameter <input type="number" step="0.5" value="${sel.dia}" onchange="updateSketch2dElem('dia', this.value)"></label>`;
-    if (sel.opType === 'boss') {
-      html += `<label>Height <input type="number" step="0.5" value="${sel.depth}" onchange="updateSketch2dElem('depth', this.value)"></label>`;
+    if (sel.opType === 'boss' || sel.opType === 'hole') {
+      html += `<label>Depth <input type="number" step="0.5" value="${sel.depth || 10}" onchange="updateSketch2dElem('depth', this.value)"></label>`;
     }
   } else if (sel.type === 'rect') {
     html += `
       <label>Width (X) <input type="number" step="0.5" value="${sel.w}" onchange="updateSketch2dElem('w', this.value)"></label>
       <label>Length (Y) <input type="number" step="0.5" value="${sel.h}" onchange="updateSketch2dElem('h', this.value)"></label>
-      <label>Depth <input type="number" step="0.5" value="${sel.depth}" onchange="updateSketch2dElem('depth', this.value)"></label>
+      <label>Depth <input type="number" step="0.5" value="${sel.depth || 5}" onchange="updateSketch2dElem('depth', this.value)"></label>
     `;
   }
   params.innerHTML = html;
@@ -1417,66 +1469,90 @@ window.updateSketch2dElem = function(key, val) {
 // to avoid overwriting the real applyOp function.
 
 window.applySketch2d = async function() {
-  if (s2dState.elements.length === 0) { closeSketch2d(); return; }
   const faceSelector = s2dState.faceSelector || (canvas.selectedFace ? canvas.selectedFace.selector : '>Y');
   const parentId = canvas.selectedBlockId || '001';
   
   closeSketch2d();
   document.getElementById('faceOpsBar').classList.remove('visible');
-  showGenOverlay(`Applying ${s2dState.elements.length} sketch features...`);
+  showGenOverlay(`Syncing ${s2dState.elements.length} sketch features...`);
   
   try {
-    for (const elem of s2dState.elements) {
-      let blockType = '';
-      let params = {};
-      // Map 2D sketch coordinates (x: right, y: up) to CadQuery's Workplane local axes
-      let cqX = elem.x;
-      let cqY = elem.y;
-      
-      if (faceSelector === '>X') {
-        cqX = elem.y;
-        cqY = -elem.x;
-      } else if (faceSelector === '<X') {
-        cqX = -elem.y;
-        cqY = elem.x;
-      } else if (faceSelector === '>Y') {
-        cqX = -elem.x;
-        cqY = -elem.y;
-      } else if (faceSelector === '<Y') {
-        cqX = elem.x;
-        cqY = elem.y;
-      } else if (faceSelector === '<Z') {
-        cqX = -elem.x;
-        cqY = -elem.y;
+    // Delete the original blocks for this face first
+    if (s2dState.originalBlockIds && s2dState.originalBlockIds.length > 0) {
+      const delRes = await fetch('/canvas/delete-blocks', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          session_id: canvas.sessionId,
+          block_ids: s2dState.originalBlockIds
+        })
+      });
+      const delData = await delRes.json();
+      if (delData.job_id) {
+         canvas.currentJobId = delData.job_id;
+         await executeJobPromise(delData.job_id);
       }
-      // >Z already matches (cqX = x, cqY = y)
+    }
 
-      if (elem.opType === 'hole') {
-        blockType = 'holes';
-        params = { hole_points: `[[${cqX},${cqY}]]`, hole_dia: elem.dia };
-      } else if (elem.opType === 'pocket') {
-        blockType = 'pockets';
-        let cqW = elem.w;
-        let cqH = elem.h;
-        if (faceSelector === '>X' || faceSelector === '<X') {
-          cqW = elem.h;
-          cqH = elem.w;
-        }
-        params = { width: cqW, length: cqH, depth: elem.depth, x: cqX, y: cqY };
+    if (s2dState.elements.length === 0) {
+      hideGenOverlay();
+      return;
+    }
+
+    // Group holes since they share one block
+    const holes = s2dState.elements.filter(e => e.opType === 'hole');
+    const others = s2dState.elements.filter(e => e.opType !== 'hole');
+    
+    const blocksToAdd = [];
+
+    const mapCoordsToCQ = (elem) => {
+      let cqX = elem.x, cqY = elem.y;
+      if (faceSelector === '>X') { cqX = elem.y; cqY = -elem.x; }
+      else if (faceSelector === '<X') { cqX = -elem.y; cqY = elem.x; }
+      else if (faceSelector === '>Y') { cqX = -elem.x; cqY = -elem.y; }
+      else if (faceSelector === '<Y') { cqX = elem.x; cqY = elem.y; }
+      else if (faceSelector === '<Z') { cqX = -elem.x; cqY = -elem.y; }
+      return { cqX, cqY };
+    };
+
+    if (holes.length > 0) {
+      const pts = holes.map(h => {
+        const c = mapCoordsToCQ(h);
+        return `[${c.cqX.toFixed(2)},${c.cqY.toFixed(2)}]`;
+      });
+      // use the first hole's dia and depth for all
+      blocksToAdd.push({
+        block_type: 'holes',
+        params: { hole_points: `[${pts.join(',')}]`, hole_dia: holes[0].dia, depth: holes[0].depth || 10 }
+      });
+    }
+
+    for (const elem of others) {
+      const { cqX, cqY } = mapCoordsToCQ(elem);
+      if (elem.opType === 'pocket') {
+        let cqW = elem.w, cqH = elem.h;
+        if (faceSelector === '>X' || faceSelector === '<X') { cqW = elem.h; cqH = elem.w; }
+        blocksToAdd.push({
+          block_type: 'pockets',
+          params: { width: cqW, length: cqH, depth: elem.depth, x: cqX, y: cqY }
+        });
       } else if (elem.opType === 'boss') {
-        blockType = 'boss';
-        params = { diameter: elem.dia, height: elem.depth, x: cqX, y: cqY };
+        blocksToAdd.push({
+          block_type: 'boss',
+          params: { diameter: elem.dia, height: elem.depth, x: cqX, y: cqY }
+        });
       }
-      
-      addChatMsg('op', `Applying ${blockType} at mapped coords x:${cqX}, y:${cqY} (from 2D ${elem.x},${elem.y})`);
-      
+    }
+
+    for (const b of blocksToAdd) {
+      addChatMsg('op', `Applying ${b.block_type}...`);
       const res = await fetch('/canvas/add-block', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({
           session_id: canvas.sessionId,
-          block_type: blockType,
-          params, parent_id: parentId, face: faceSelector
+          block_type: b.block_type,
+          params: b.params, parent_id: parentId, face: faceSelector
         })
       });
       const data = await res.json();
