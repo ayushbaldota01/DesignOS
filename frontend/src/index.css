@@ -37,6 +37,8 @@ html, body {
   overflow: hidden;
   font-size: 12px;
   -webkit-font-smoothing: antialiased;
+  display: flex;
+  flex-direction: column;
 }
 
 /* ─── SCROLLBARS ─── */
@@ -268,7 +270,8 @@ html, body {
    ═══════════════════════════════════════════════════════════════ */
 .main-layout {
   display: flex;
-  height: calc(100vh - 44px - 36px - 24px);
+  flex: 1;
+  min-height: 0;
 }
 
 /* ─── LEFT PANEL ─── */

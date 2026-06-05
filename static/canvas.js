@@ -1251,11 +1251,11 @@ function onSketch2dMouseDown(e) {
   } else {
     // create shape
     const id = Date.now().toString();
-    if (s2dState.currentTool === 'circle') {
+    if (s2dState.currentTool === 'hole') {
       s2dState.elements.push({ id, type: 'circle', opType: 'hole', x: s2dState.snappedX, y: s2dState.snappedY, dia: 6.6 });
     } else if (s2dState.currentTool === 'rect_pocket') {
       s2dState.elements.push({ id, type: 'rect', opType: 'pocket', x: s2dState.snappedX, y: s2dState.snappedY, w: 20, h: 15, depth: 5 });
-    } else if (s2dState.currentTool === 'rect_boss') {
+    } else if (s2dState.currentTool === 'extrude') {
       s2dState.elements.push({ id, type: 'circle', opType: 'boss', x: s2dState.snappedX, y: s2dState.snappedY, dia: 15, depth: 5 });
     }
     s2dState.selectedId = id;
@@ -1339,8 +1339,8 @@ function drawSketch2d() {
     ctx.strokeStyle = '#ff8c00';
     ctx.fillStyle = 'rgba(255,140,0,0.3)';
     ctx.beginPath();
-    if (s2dState.currentTool === 'circle' || s2dState.currentTool === 'rect_boss') {
-      const r = ((s2dState.currentTool === 'circle' ? 6.6 : 15) / 2) * s2dState.pxPerMm;
+    if (s2dState.currentTool === 'hole' || s2dState.currentTool === 'extrude') {
+      const r = ((s2dState.currentTool === 'hole' ? 6.6 : 15) / 2) * s2dState.pxPerMm;
       ctx.arc(cx, cy, r, 0, Math.PI * 2);
     } else if (s2dState.currentTool === 'rect_pocket') {
       const rw = 20 * s2dState.pxPerMm;

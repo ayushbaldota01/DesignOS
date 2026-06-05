@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>DesignOS — AI-Powered CAD</title>
   <meta name="description" content="DesignOS: Professional AI-powered parametric CAD design platform">
-  <link rel="stylesheet" href="/static/ide.css">
+  <link rel="stylesheet" href="/static/ide.css?v=13">
   <script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.44.0/min/vs/loader.js"></script>
   <script type="importmap">
   {
@@ -75,142 +75,124 @@
      TAB 1 — MANUAL 2D/3D
      ═══════════════════════════════════════════════════════════════ -->
 <div class="tab-content" id="contentManual">
-  <!-- Context toolbar for manual mode -->
-  <div class="context-toolbar">
-    <button class="tool-btn" onclick="manualTool('extrude')"><span class="ti">↑</span> Extrude</button>
-    <button class="tool-btn" onclick="manualTool('revolve')"><span class="ti">⟳</span> Revolve</button>
-    <button class="tool-btn" onclick="manualTool('sweep')"><span class="ti">↝</span> Sweep</button>
-    <button class="tool-btn" onclick="manualTool('loft')"><span class="ti">⋈</span> Loft</button>
-    <div class="tool-sep"></div>
-    <button class="tool-btn" onclick="manualTool('shell')"><span class="ti">◻</span> Shell</button>
-    <button class="tool-btn" onclick="manualTool('fillet')"><span class="ti">⌒</span> Fillet</button>
-    <button class="tool-btn" onclick="manualTool('chamfer')"><span class="ti">/</span> Chamfer</button>
-    <button class="tool-btn" onclick="manualTool('hole')"><span class="ti">○</span> Hole</button>
-    <button class="tool-btn" onclick="manualTool('mirror')"><span class="ti">⊞</span> Mirror</button>
-  </div>
-
-  <div class="main-layout">
-    <!-- Left: Sketch tools -->
-    <div class="left-panel">
-      <div class="panel-header">Sketch Tools</div>
-
-      <div class="sketch-section">
-        <div class="sketch-section-title">Draw</div>
-        <div class="sketch-tool" onclick="manualTool('select')">
-          <span class="sketch-tool-icon">□</span> Select
-          <span class="sketch-tool-shortcut">V</span>
-        </div>
-        <div class="sketch-tool" onclick="manualTool('line')">
-          <span class="sketch-tool-icon">/</span> Line
-          <span class="sketch-tool-shortcut">L</span>
-        </div>
-        <div class="sketch-tool" onclick="manualTool('circle')">
-          <span class="sketch-tool-icon">○</span> Circle
-          <span class="sketch-tool-shortcut">C</span>
-        </div>
-        <div class="sketch-tool" onclick="manualTool('rectangle')">
-          <span class="sketch-tool-icon">□</span> Rectangle
-          <span class="sketch-tool-shortcut">R</span>
-        </div>
-        <div class="sketch-tool" onclick="manualTool('arc')">
-          <span class="sketch-tool-icon">⌒</span> Arc
-          <span class="sketch-tool-shortcut">A</span>
-        </div>
-        <div class="sketch-tool" onclick="manualTool('point')">
-          <span class="sketch-tool-icon">·</span> Point
-          <span class="sketch-tool-shortcut">P</span>
-        </div>
-        <div class="sketch-tool" onclick="manualTool('spline')">
-          <span class="sketch-tool-icon">∿</span> Spline
-          <span class="sketch-tool-shortcut">S</span>
-        </div>
-        <div class="sketch-tool" onclick="manualTool('polygon')">
-          <span class="sketch-tool-icon">⬡</span> Polygon
-          <span class="sketch-tool-shortcut">G</span>
-        </div>
-      </div>
-
-      <div class="sketch-section">
-        <div class="sketch-section-title">Modify</div>
-        <div class="sketch-tool" onclick="manualTool('offset')">
-          <span class="sketch-tool-icon">⊕</span> Offset
-        </div>
-        <div class="sketch-tool" onclick="manualTool('trim')">
-          <span class="sketch-tool-icon">⊣</span> Trim
-        </div>
-        <div class="sketch-tool" onclick="manualTool('extend')">
-          <span class="sketch-tool-icon">→</span> Extend
-        </div>
-        <div class="sketch-tool" onclick="manualTool('mirror_sketch')">
-          <span class="sketch-tool-icon">⟳</span> Mirror
-        </div>
-        <div class="sketch-tool" onclick="manualTool('pattern')">
-          <span class="sketch-tool-icon">⊞</span> Pattern
-        </div>
-      </div>
-
-      <div class="sketch-section">
-        <div class="sketch-section-title">Constraints</div>
-        <div class="sketch-tool" onclick="manualTool('parallel')">
-          <span class="sketch-tool-icon">∥</span> Parallel
-        </div>
-        <div class="sketch-tool" onclick="manualTool('perpendicular')">
-          <span class="sketch-tool-icon">⊥</span> Perpendicular
-        </div>
-        <div class="sketch-tool" onclick="manualTool('equal')">
-          <span class="sketch-tool-icon">≡</span> Equal
-        </div>
-        <div class="sketch-tool" onclick="manualTool('concentric')">
-          <span class="sketch-tool-icon">◎</span> Concentric
-        </div>
-        <div class="sketch-tool" onclick="manualTool('tangent')">
-          <span class="sketch-tool-icon">⊾</span> Tangent
-        </div>
-        <div class="sketch-tool" onclick="manualTool('dimension')">
-          <span class="sketch-tool-icon">📐</span> Dimension
-        </div>
-      </div>
-    </div>
-
-    <!-- Center: Viewport -->
-    <div class="center-area">
-      <div class="canvas-area" id="manualViewport">
-        <!-- Manual Tab Canvas Area -->
-        <div class="sketch-container" id="sketchContainer">
-            <div class="sketch-face-indicator" id="sketchFaceIndicator">
-                Select a face in Prompt tab and click "Edit in 2D" to start sketching
+    <div class="manual-layout">
+        
+        <div class="manual-left-panel">
+            <div class="panel-header">ACTIONS</div>
+            <div class="sketch-tools-group" style="display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding-bottom: 8px;">
+                <button class="sketch-tool-btn" onclick="undoSketch()">↩ Undo</button>
+                <button class="sketch-tool-btn" onclick="redoSketch()">↪ Redo</button>
+                <button class="sketch-tool-btn" style="grid-column: span 2;" onclick="clearSketch()">✕ Clear Sketch</button>
             </div>
-            <canvas id="sketchCanvas"></canvas>
+
+            <div class="panel-header" style="margin-top:12px">SKETCH TOOLS</div>
+            <div class="sketch-tools-group">
+                <button class="sketch-tool-btn active" data-tool="select" onclick="setSketchTool('select')">▷ Select</button>
+                <button class="sketch-tool-btn" data-tool="line" onclick="setSketchTool('line')">/ Line</button>
+                <button class="sketch-tool-btn" data-tool="rectangle" onclick="setSketchTool('rectangle')">□ Rectangle</button>
+                <button class="sketch-tool-btn" data-tool="circle" onclick="setSketchTool('circle')">○ Circle</button>
+                <button class="sketch-tool-btn" data-tool="point" onclick="setSketchTool('point')">· Point</button>
+                <button class="sketch-tool-btn" data-tool="measure" onclick="setSketchTool('measure')">📏 Measure</button>
+            </div>
+            
+            <div class="panel-header" style="margin-top:12px">SNAP</div>
+            <div class="sketch-tools-group">
+                <label class="snap-toggle">
+                    <input type="checkbox" id="snapGrid" checked onchange="toggleSnap('grid', this.checked)"> Grid
+                </label>
+                <label class="snap-toggle">
+                    <input type="checkbox" id="snapAngle" onchange="toggleSnap('angle', this.checked)"> 15° Angle
+                </label>
+                <label class="snap-toggle">
+                    <input type="checkbox" id="snapVertexEdge" checked onchange="toggleSnap('vertex_edge', this.checked)"> Vertices & Edges
+                </label>
+            </div>
+
+            <div class="panel-header" style="margin-top:12px">3D OPERATIONS</div>
+            <div class="sketch-tools-group" style="padding: 8px;">
+                <!-- Extrude -->
+                <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom: 8px;">
+                    <span style="font-size:11px; color:var(--text-primary);">Extrude Depth:</span>
+                    <input type="number" id="manualExtrudeDepth" value="10" step="1" style="width:50px; font-size:11px; background:var(--bg-secondary); border:1px solid var(--border); color:var(--text-primary); padding:2px;">
+                </div>
+                <button class="btn-app-primary" style="width:100%; margin-bottom: 12px; font-size: 11px;" onclick="extrudeSketch(document.getElementById('manualExtrudeDepth').value)">Extrude Sketch →</button>
+                
+                <!-- Hole -->
+                <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom: 4px;">
+                    <span style="font-size:11px; color:var(--text-primary);">Hole Dia:</span>
+                    <input type="number" id="manualHoleDia" value="5" step="0.5" style="width:50px; font-size:11px; background:var(--bg-secondary); border:1px solid var(--border); color:var(--text-primary); padding:2px;">
+                </div>
+                <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom: 8px;">
+                    <span style="font-size:11px; color:var(--text-primary);">Hole Depth:</span>
+                    <input type="number" id="manualHoleDepth" value="10" step="1" style="width:50px; font-size:11px; background:var(--bg-secondary); border:1px solid var(--border); color:var(--text-primary); padding:2px;">
+                </div>
+                <button class="btn-app" style="width:100%; font-size: 11px;" onclick="createHoleFromSketch()">Create Hole →</button>
+            </div>
+            
+            <div class="panel-header" style="margin-top:12px">ADD TEMPLATE</div>
+            <div class="sketch-template-list">
+                <div class="sketch-tmpl-item" onclick="addTemplateAt2DCursor('bracket')">L Bracket</div>
+                <div class="sketch-tmpl-item" onclick="addTemplateAt2DCursor('plate')">Plate</div>
+                <div class="sketch-tmpl-item" onclick="addTemplateAt2DCursor('shaft')">Shaft</div>
+                <div class="sketch-tmpl-item" onclick="addTemplateAt2DCursor('housing')">Housing</div>
+                <div class="sketch-tmpl-item" onclick="addTemplateAt2DCursor('channel')">U Channel</div>
+                <div class="sketch-tmpl-item" onclick="addTemplateAt2DCursor('crankshaft')">Crankshaft</div>
+                <div class="sketch-tmpl-item" onclick="addTemplateAt2DCursor('piston')">Piston</div>
+            </div>
+        </div>
+        
+        <!-- CENTER: 2D Sketch Canvas -->
+        <div class="manual-center">
+            <!-- View selector -->
+            <div class="view-selector-bar">
+                <span class="view-label">VIEW PLANE:</span>
+                <button class="view-btn active" onclick="setSketchPlane('top')">Top (XY)</button>
+                <button class="view-btn" onclick="setSketchPlane('front')">Front (XZ)</button>
+                <button class="view-btn" onclick="setSketchPlane('side')">Side (YZ)</button>
+                <div style="margin-left:auto;display:flex;gap:6px;align-items:center">
+                    <button class="view-btn" onclick="syncFrom3D()">↙ From 3D</button>
+                    <button class="view-btn" onclick="syncTo3D()">↗ To 3D</button>
+                </div>
+            </div>
+            
+            <!-- Sketch canvas -->
+            <div class="sketch-face-indicator" id="sketchFaceIndicator">
+                No face selected — drawing on XY plane | Click "From 3D" to project current 3D model
+            </div>
+            <canvas id="sketchCanvas" class="sketch-canvas-main"></canvas>
+            
+            <!-- Bottom bar -->
             <div class="sketch-bottom-bar">
-                <button onclick="setSketchTool('select')" data-tool="select" class="sketch-tool-btn">Select</button>
-                <button onclick="setSketchTool('line')" data-tool="line" class="sketch-tool-btn">/ Line</button>
-                <button onclick="setSketchTool('circle')" data-tool="circle" class="sketch-tool-btn">○ Circle</button>
-                <button onclick="setSketchTool('rectangle')" data-tool="rectangle" class="sketch-tool-btn">□ Rect</button>
-                <div class="sketch-bar-sep"></div>
-                <button onclick="clearSketch()" class="sketch-tool-btn">Clear</button>
+                <span style="font-size:10px;color:var(--text-dim)" id="sketchCoordsDisplay">x: 0.0  y: 0.0</span>
+                <span class="sketch-bar-sep"></span>
+                <span style="font-size:10px;color:var(--text-dim)" id="sketchElementCount">0 elements</span>
+                <span class="sketch-bar-sep"></span>
+                <button class="sketch-tool-btn" onclick="clearSketch()">Clear</button>
+                <button class="sketch-tool-btn" onclick="undoSketch()">↩ Undo</button>
+                <button class="sketch-tool-btn" onclick="redoSketch()">↪ Redo</button>
                 <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
-                    <label style="font-size:11px;color:var(--text-secondary)">Extrude depth</label>
-                    <input type="number" id="extrudeDepth" value="10" style="width:60px;background:var(--bg-primary);border:1px solid var(--border);color:var(--text-primary);padding:4px;font-size:11px">
-                    <span style="font-size:11px;color:var(--text-dim)">mm</span>
-                    <button onclick="extrudeSketch(document.getElementById('extrudeDepth').value)" class="btn-app-primary">Extrude →</button>
+                    <button onclick="sendSketchToPromptTab()" class="btn-app">→ Prompt Tab</button>
                 </div>
             </div>
         </div>
-      </div>
-    </div>
-
-    <!-- Right: empty for now -->
-    <div class="right-panel">
-      <div class="right-panel-section">
-        <div class="right-panel-section-header">SKETCH PROPERTIES</div>
-      </div>
-      <div class="props-body">
-        <div style="padding:12px;color:var(--text-dim);font-size:11px;">
-          Select a sketch element to view properties.
+        
+        <!-- RIGHT: Live 3D Preview -->
+        <div class="manual-right-preview">
+            <div class="view-selector-bar">
+                <span class="view-label">3D PREVIEW</span>
+                <div style="margin-left:auto;display:flex;gap:4px">
+                    <button class="view-btn" onclick="set3DPreviewAngle('top')">⊤</button>
+                    <button class="view-btn" onclick="set3DPreviewAngle('front')">□</button>
+                    <button class="view-btn" onclick="set3DPreviewAngle('iso')">⬡</button>
+                </div>
+            </div>
+            <canvas id="preview3DCanvas" class="preview-3d-canvas"></canvas>
+            <div style="padding:6px 10px;font-size:10px;color:var(--text-dim);border-top:1px solid var(--border)">
+                Live preview updates as you sketch
+            </div>
         </div>
-      </div>
+        
     </div>
-  </div>
 </div>
 
 <!-- ═══════════════════════════════════════════════════════════════
@@ -533,14 +515,14 @@
           <span class="ti">□</span> Select
         </button>
         <div class="sketch2d-separator"></div>
-        <button class="sketch2d-tool-btn" id="s2dTool_circle" onclick="selectSketch2dTool('circle')">
-          <span class="ti">○</span> Circle (Hole)
+        <button class="sketch2d-tool-btn" id="s2dTool_hole" onclick="selectSketch2dTool('hole')">
+          <span class="ti">○</span> Create Hole
         </button>
         <button class="sketch2d-tool-btn" id="s2dTool_rect_pocket" onclick="selectSketch2dTool('rect_pocket')">
-          <span class="ti">▽</span> Rect (Pocket)
+          <span class="ti">▽</span> Rect Pocket
         </button>
-        <button class="sketch2d-tool-btn" id="s2dTool_rect_boss" onclick="selectSketch2dTool('rect_boss')">
-          <span class="ti">⬆</span> Circle (Boss)
+        <button class="sketch2d-tool-btn" id="s2dTool_extrude" onclick="selectSketch2dTool('extrude')">
+          <span class="ti">⬆</span> Extrude
         </button>
         <div class="sketch2d-separator"></div>
         <button class="sketch2d-tool-btn" onclick="clearSketch2d()">
@@ -589,12 +571,12 @@
 <!-- ═══════════════════════════════════════════════════════════════
      SCRIPTS
      ═══════════════════════════════════════════════════════════════ -->
-<script src="/static/canvas.js?v=10"></script>
-<script src="/static/editor.js?v=10"></script>
-<script src="/static/manual_sketch.js?v=10"></script>
+<script src="/static/canvas.js?v=13"></script>
+<script src="/static/editor.js?v=13"></script>
+<script src="/static/manual_sketch.js?v=13"></script>
 
 <script type="module">
-  import { CADViewer } from '/static/viewer.js?v=10';
+  import { CADViewer } from '/static/viewer.js?v=13';
 
   // Initialize viewer in the prompt tab viewport
   const viewer = new CADViewer('viewerCanvas');
