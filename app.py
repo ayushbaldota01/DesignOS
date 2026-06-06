@@ -16,12 +16,79 @@ from flask import Flask, request, jsonify, send_file, render_template, Response
 from flask_cors import CORS
 import requests as http_requests
 from block_engine import parse_blocks, update_block_param, update_block_params, add_block_to_script, assemble_block_script
+from datetime import datetime, timedelta
+
+# ── MEMORY MANAGEMENT ─────────────────────────────────────────────
+
+MAX_JOBS_IN_MEMORY = 20      # Keep only last 20 jobs in RAM
+TEMP_FILE_MAX_AGE_HOURS = 2  # Delete temp files older than 2 hours
+CLEANUP_INTERVAL_SECONDS = 300  # Run cleanup every 5 minutes
+
+def cleanup_old_jobs():
+    """Remove old jobs from memory, keeping only the most recent MAX_JOBS_IN_MEMORY"""
+    global jobs
+    with jobs_lock:
+        if len(jobs) <= MAX_JOBS_IN_MEMORY:
+            return
+        
+        # Sort by creation time, keep newest
+        sorted_jobs = sorted(
+            jobs.items(),
+            key=lambda x: x[1].get('created_at', 0),
+            reverse=True
+        )
+        
+        # Keep only recent jobs
+        jobs_to_keep = dict(sorted_jobs[:MAX_JOBS_IN_MEMORY])
+        jobs_to_remove = [jid for jid in jobs if jid not in jobs_to_keep]
+        
+        for jid in jobs_to_remove:
+            jobs.pop(jid, None)
+        
+        if jobs_to_remove:
+            print(f"[Cleanup] Removed {len(jobs_to_remove)} old jobs from memory")
+
+def cleanup_temp_files():
+    """Delete temp files older than TEMP_FILE_MAX_AGE_HOURS"""
+    if not os.path.exists(TEMP_DIR):
+        return
+    
+    cutoff = datetime.now() - timedelta(hours=TEMP_FILE_MAX_AGE_HOURS)
+    removed = 0
+    
+    for fname in os.listdir(TEMP_DIR):
+        fpath = os.path.join(TEMP_DIR, fname)
+        try:
+            mtime = datetime.fromtimestamp(os.path.getmtime(fpath))
+            if mtime < cutoff:
+                os.remove(fpath)
+                removed += 1
+        except Exception:
+            pass
+    
+    if removed:
+        print(f"[Cleanup] Deleted {removed} temp files")
+
+def background_cleanup():
+    """Runs in background thread every CLEANUP_INTERVAL_SECONDS"""
+    while True:
+        time.sleep(CLEANUP_INTERVAL_SECONDS)
+        try:
+            cleanup_old_jobs()
+            cleanup_temp_files()
+        except Exception as e:
+            print(f"[Cleanup] Error: {e}")
+
+# Start cleanup thread
+cleanup_thread = threading.Thread(target=background_cleanup, daemon=True)
+cleanup_thread.start()
 
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
 
 app = Flask(__name__)
+app.start_time = time.time()
 CORS(app, origins=["http://localhost:5000", "http://127.0.0.1:5000"])
 
 TEMP_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "temp")
@@ -34,6 +101,7 @@ os.makedirs(TEMP_DIR, exist_ok=True)
 
 # In-memory job store  (adequate for single-user local use)
 jobs: dict = {}
+jobs_lock = threading.Lock()
 
 # ---------------------------------------------------------------------------
 # System prompts
@@ -420,7 +488,7 @@ if _designos_export_target is not None:
             [CADQUERY_PYTHON, script_path],
             capture_output=True,
             text=True,
-            timeout=60,
+            timeout=120,
             cwd=TEMP_DIR,
         )
         if proc.returncode == 0 and os.path.exists(step_path):
@@ -428,7 +496,7 @@ if _designos_export_target is not None:
         error = proc.stderr or proc.stdout or "Unknown execution error"
         return False, error
     except subprocess.TimeoutExpired:
-        return False, "Script execution timed out (60 s)"
+        return False, "Script execution timed out (120 s)"
     except Exception as exc:
         return False, str(exc)
     # NOTE: We intentionally do NOT delete the script file here.
@@ -466,7 +534,7 @@ print(json.dumps(dims))
         f.write(validate_script)
     
     try:
-        proc = subprocess.run([CADQUERY_PYTHON, script_path], capture_output=True, text=True, timeout=30)
+        proc = subprocess.run([CADQUERY_PYTHON, script_path], capture_output=True, text=True, timeout=120)
         os.unlink(script_path)
         dims = json.loads(proc.stdout.strip())
         
@@ -599,20 +667,22 @@ def run_manual_script(job_id: str, script: str):
 def _new_job(prompt: str) -> str:
     """Create a fresh job record and return its id."""
     job_id = uuid.uuid4().hex[:8]
-    jobs[job_id] = {
-        "status": "running",
-        "step": "starting",
-        "attempt": 0,
-        "max_attempts": 3,
-        "log": [],
-        "script": None,
-        "spec": None,
-        "step_file": None,
-        "stl_file": None,
-        "glb_file": None,
-        "error": None,
-        "prompt": prompt,
-    }
+    with jobs_lock:
+        jobs[job_id] = {
+            "status": "running",
+            "step": "starting",
+            "attempt": 0,
+            "max_attempts": 3,
+            "log": [],
+            "script": None,
+            "spec": None,
+            "step_file": None,
+            "stl_file": None,
+            "glb_file": None,
+            "error": None,
+            "prompt": prompt,
+            "created_at": time.time()
+        }
     return job_id
 
 
@@ -1294,7 +1364,59 @@ def _run_canvas_job(job_id, script):
         _log(job_id, "execute", "error", "Execution failed", error)
 
 
+@app.route("/admin/cleanup", methods=["POST"])
+def manual_cleanup():
+    cleanup_old_jobs()
+    cleanup_temp_files()
+    temp_count = len(os.listdir(TEMP_DIR)) if os.path.exists(TEMP_DIR) else 0
+    return jsonify({
+        "jobs_in_memory": len(jobs),
+        "temp_files_remaining": temp_count,
+        "status": "cleaned"
+    })
+
+@app.route("/admin/stats")
+def system_stats():
+    import psutil
+    process = psutil.Process(os.getpid())
+    temp_size = sum(
+        os.path.getsize(os.path.join(TEMP_DIR, f))
+        for f in os.listdir(TEMP_DIR)
+        if os.path.exists(os.path.join(TEMP_DIR, f))
+    ) if os.path.exists(TEMP_DIR) else 0
+    
+    return jsonify({
+        "ram_mb": round(process.memory_info().rss / 1024 / 1024, 1),
+        "jobs_in_memory": len(jobs),
+        "temp_files": len(os.listdir(TEMP_DIR)) if os.path.exists(TEMP_DIR) else 0,
+        "temp_size_mb": round(temp_size / 1024 / 1024, 2),
+        "uptime_minutes": round((time.time() - app.start_time) / 60, 1)
+    })
+
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    app.run(debug=False, use_reloader=False, port=5000)
+    import sys
+    
+    # Install waitress if missing
+    try:
+        from waitress import serve as waitress_serve
+        USE_WAITRESS = True
+    except ImportError:
+        USE_WAITRESS = False
+    
+    # Create temp directory
+    os.makedirs(TEMP_DIR, exist_ok=True)
+    
+    print(f"\n{'='*50}")
+    print(f"  DesignOS — Local AI CAD")
+    print(f"  Server: http://localhost:5000")
+    print(f"  Temp:   {TEMP_DIR}")
+    print(f"{'='*50}\n")
+    
+    if USE_WAITRESS:
+        print("  Production server (Waitress)")
+        waitress_serve(app, host='127.0.0.1', port=5000, threads=8)
+    else:
+        print("  Dev server — run: pip install waitress")
+        app.run(host='127.0.0.1', port=5000, debug=False, threaded=True)

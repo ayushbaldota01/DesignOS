@@ -82,10 +82,10 @@ export class CADViewer {
       preserveDrawingBuffer: true  // for thumbnail capture
     });
     this.renderer.setSize(this.container.clientWidth, this.container.clientHeight);
-    this.renderer.setPixelRatio(window.devicePixelRatio);
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.2;
-    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.enabled = false;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.autoClear = false;
     this.container.appendChild(this.renderer.domElement);
@@ -459,8 +459,24 @@ export class CADViewer {
 
   loadGLTF(url) {
       this.clear();
+      this.loadToken = (this.loadToken || 0) + 1;
+      const currentToken = this.loadToken;
+      
       const loader = new GLTFLoader();
       loader.load(url, (gltf) => {
+          if (this.loadToken !== currentToken) {
+              // Rapid load override, dispose immediately
+              gltf.scene.traverse(child => {
+                  if (child.isMesh) {
+                      if (child.geometry) child.geometry.dispose();
+                      if (child.material) {
+                          if (Array.isArray(child.material)) child.material.forEach(m => m.dispose());
+                          else child.material.dispose();
+                      }
+                  }
+              });
+              return;
+          }
           const model = gltf.scene;
           
           const material = new THREE.MeshStandardMaterial({
@@ -497,17 +513,51 @@ export class CADViewer {
       }, undefined, (err) => console.error("GLTF load error:", err));
   }
 
-  loadSTL(url) {
+  _disposeCurrentModel() {
     if (this.currentModel) {
-      this.scene.remove(this.currentModel);
-      this.currentModel.geometry.dispose();
-      this.currentModel.material.dispose();
-      this.currentModel = null;
+        this.currentModel.traverse((child) => {
+            if (child.isMesh) {
+                if (child.geometry) {
+                    child.geometry.dispose();
+                }
+                if (child.material) {
+                    if (Array.isArray(child.material)) {
+                        child.material.forEach(m => m.dispose());
+                    } else {
+                        child.material.dispose();
+                    }
+                }
+            }
+        });
+        this.scene.remove(this.currentModel);
+        this.currentModel = null;
     }
+    
+    // Also dispose assembly parts
+    Object.values(this.partMeshes || {}).forEach(mesh => {
+        if (mesh.geometry) mesh.geometry.dispose();
+        if (mesh.material) mesh.material.dispose();
+        this.scene.remove(mesh);
+    });
+    this.partMeshes = {};
+    
+    // Force renderer to release GPU memory
+    this.renderer.renderLists.dispose();
+  }
+
+  loadSTL(url) {
+    this._disposeCurrentModel();
     this.clearFaceSelection();
+
+    this.loadToken = (this.loadToken || 0) + 1;
+    const currentToken = this.loadToken;
 
     const loader = new STLLoader();
     loader.load(url, (geometry) => {
+      if (this.loadToken !== currentToken) {
+          geometry.dispose();
+          return;
+      }
       geometry.computeVertexNormals();
       const material = new THREE.MeshStandardMaterial({
         color: COLORS.partBase,

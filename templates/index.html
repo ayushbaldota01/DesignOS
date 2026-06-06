@@ -50,6 +50,13 @@
     <div class="menu-item" onclick="showToast('Insert menu — coming soon')">Insert ▾</div>
   </div>
   <div class="app-bar-right">
+    <div id="sysStats" class="sys-stats" onclick="refreshStats()" title="Click to refresh">
+        <span id="statRam">-- MB</span>
+        <span class="stat-sep">│</span>
+        <span id="statJobs">-- jobs</span>
+        <span class="stat-sep">│</span>
+        <span id="statTemp">-- files</span>
+    </div>
     <button class="btn-app" onclick="showToast('Save — coming soon')">Save</button>
     <button class="btn-app" onclick="exportSTEP()">Export STEP</button>
     <button class="btn-app-primary" onclick="exportSTL()">Export STL</button>
@@ -170,6 +177,16 @@
                 <button class="sketch-tool-btn" onclick="clearSketch()">Clear</button>
                 <button class="sketch-tool-btn" onclick="undoSketch()">↩ Undo</button>
                 <button class="sketch-tool-btn" onclick="redoSketch()">↪ Redo</button>
+                <span class="sketch-bar-sep"></span>
+                <span style="font-size:10px;color:var(--text-dim)">Hole ⌀</span>
+                <input type="number" id="holeDia" value="6.6" step="0.5" min="1"
+                       style="width:50px;background:var(--bg-primary);border:1px solid var(--border);
+                              color:var(--text-primary);padding:4px 6px;font-size:11px">
+                <span style="font-size:10px;color:var(--text-dim)">mm</span>
+                <button onclick="addHoleFromSketch(
+                    document.getElementById('holeDia').value,
+                    sketch.cursor.x, sketch.cursor.y
+                )" class="btn-app">⊕ Add Hole at Cursor</button>
                 <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
                     <button onclick="sendSketchToPromptTab()" class="btn-app">→ Prompt Tab</button>
                 </div>

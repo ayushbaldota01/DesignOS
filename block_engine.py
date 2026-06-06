@@ -13,8 +13,8 @@ import math
 
 BLOCK_PATTERN = re.compile(
     r'# \[BLOCK_(\d+)\] type=(\w+) params=(.+?)(?:\s+parent=(\d+))?(?:\s+face=(\S+))?\n'
-    r'([^\n]+)',
-    re.MULTILINE
+    r'((?:(?!# \[BLOCK_|result = cq\.Assembly).)*)',
+    re.MULTILINE | re.DOTALL
 )
 
 

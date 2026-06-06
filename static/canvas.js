@@ -1703,3 +1703,33 @@ async function buildCustomAssembly() {
     }
 }
 window.buildCustomAssembly = buildCustomAssembly;
+
+// System Stats
+async function refreshStats() {
+    try {
+        const res = await fetch('/admin/stats');
+        const data = await res.json();
+        const elRam = document.getElementById('statRam');
+        const elJobs = document.getElementById('statJobs');
+        const elTemp = document.getElementById('statTemp');
+        const elStats = document.getElementById('sysStats');
+        
+        if (elRam) elRam.textContent = `${data.ram_mb}MB`;
+        if (elJobs) elJobs.textContent = `${data.jobs_in_memory} jobs`;
+        if (elTemp) elTemp.textContent = `${data.temp_files} tmp`;
+        
+        // Warn if RAM high
+        if (elStats) {
+            if (data.ram_mb > 800) {
+                elStats.style.color = 'var(--warning)';
+            } else {
+                elStats.style.color = 'var(--text-dim)';
+            }
+        }
+    } catch(e) {}
+}
+window.refreshStats = refreshStats;
+
+// Auto refresh every 2 minutes
+setInterval(refreshStats, 120000);
+document.addEventListener('DOMContentLoaded', () => setTimeout(refreshStats, 2000));

@@ -319,7 +319,7 @@ def add_flange_holes(body, face_tag="flange_base", dia=8.0, clearance=16.0, face
                 .vertices()
                 .hole(d))
     except Exception as e:
-        return body
+        raise RuntimeError(f"Failed to add flange holes: {str(e)}")
 
 def apply_smart_fillet(body, radius=2.0, face_selector=">Y"):
     """Fillets the specific edges bounding the selected face."""
@@ -329,8 +329,8 @@ def apply_smart_fillet(body, radius=2.0, face_selector=">Y"):
     except Exception:
         try:
             return body.faces(face_selector).edges().fillet(r * 0.5)
-        except Exception:
-            return body
+        except Exception as e2:
+            raise RuntimeError(f"Failed to apply smart fillet: {str(e2)}")
 
 def add_holes(result, hole_points, hole_dia, depth=None, face_selector=">Y"):
     try:
@@ -340,22 +340,22 @@ def add_holes(result, hole_points, hole_dia, depth=None, face_selector=">Y"):
             dp = validate_bounds(depth, 0.1, 1000.0, 10.0)
             return wp.pushPoints(hole_points).circle(d / 2.0).cutBlind(-dp, clean=False)
         return wp.pushPoints(hole_points).hole(d, clean=False)
-    except Exception:
-        return result
+    except Exception as e:
+        raise RuntimeError(f"Failed to add holes: {str(e)}")
 
 def add_fillets(result, radius, face_selector=">Y"):
     try:
         r = validate_bounds(radius, 0.1, 50.0, 2.0)
         return result.faces(face_selector).edges().fillet(r)
-    except Exception:
-        return result
+    except Exception as e:
+        raise RuntimeError(f"Failed to apply fillets: {str(e)}")
 
 def add_chamfers(result, size, face_selector=">Y"):
     try:
         s = validate_bounds(size, 0.1, 50.0, 1.0)
         return result.faces(face_selector).edges().chamfer(s)
-    except Exception:
-        return result
+    except Exception as e:
+        raise RuntimeError(f"Failed to apply chamfers: {str(e)}")
 
 def add_pocket(result, pocket_w, pocket_l, depth, x=0, y=0, face_selector=">Y"):
     try:
@@ -368,15 +368,15 @@ def add_pocket(result, pocket_w, pocket_l, depth, x=0, y=0, face_selector=">Y"):
         if cx != 0 or cy != 0:
             return wp.center(cx, cy).rect(w, l).cutBlind(-d, clean=False)
         return wp.rect(w, l).cutBlind(-d, clean=False)
-    except Exception:
-        return result
+    except Exception as e:
+        raise RuntimeError(f"Failed to add pocket: {str(e)}")
 
 def add_shell(result, wall_t, face_selector=">Y"):
     try:
         t = validate_bounds(wall_t, 0.1, 100.0, 2.0)
         return result.faces(face_selector).shell(-t)
-    except Exception:
-        return result
+    except Exception as e:
+        raise RuntimeError(f"Failed to apply shell: {str(e)}")
 
 def add_boss(result, diameter, height, x=0, y=0, face_selector=">Y"):
     try:
@@ -386,8 +386,8 @@ def add_boss(result, diameter, height, x=0, y=0, face_selector=">Y"):
         py = validate_bounds(y, -500.0, 500.0, 0.0)
         wp = get_working_plane(result, face_selector)
         return wp.pushPoints([(px, py)]).circle(d/2).extrude(h, clean=False)
-    except Exception:
-        return result
+    except Exception as e:
+        raise RuntimeError(f"Failed to add boss: {str(e)}")
 
 FEATURE_MAP = {
     "holes": add_holes,

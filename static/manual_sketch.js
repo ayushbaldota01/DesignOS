@@ -602,15 +602,159 @@ function addTemplateAt2DCursor(templateName) {
 // ── EXTRUDE + EXPORT ─────────────────────────────────────────────
 
 async function extrudeSketch(depth) {
-    if (sketch.elements.filter(e => e.type !== 'template_marker' && e.type !== 'measure_temp').length === 0) {
-        showToast('Draw a closed profile first (rectangle or circle)');
+    const depthVal = parseFloat(depth) || 10;
+    
+    // Filter usable elements
+    const rects = sketch.elements.filter(e => e.type === 'rect');
+    const circles = sketch.elements.filter(e => e.type === 'circle');
+    
+    if (rects.length === 0 && circles.length === 0) {
+        showToast('Draw a rectangle or circle profile first');
         return;
     }
-    const description = sketchToDescription();
-    const instruction = `Create geometry from this 2D sketch profile extruded ${depth}mm:\n${description}`;
-    switchTab('prompt');
-    document.getElementById('aiInput').value = instruction;
-    await submitChat(instruction);
+    
+    // DIRECT execution — no Qwen, no AI
+    // Build CadQuery script directly from sketch geometry
+    const faceSelector = getFaceSelectorFromPlane(sketch.plane);
+    let scriptLines = [
+        "import cadquery as cq",
+        "import sys",
+        "sys.path.insert(0, r'H:\\DesignOS')",
+        ""
+    ];
+    
+    // Check if we're adding to existing geometry
+    const hasExisting = window.currentScript && 
+                        window.currentScript.includes('output_path');
+    
+    if (hasExisting) {
+        // Inject into existing script — add operation on selected face
+        scriptLines = window.currentScript.split('\n')
+            .filter(l => !l.includes('exporters.export'));
+        
+        // Add sketch elements as operations on existing geometry
+        circles.forEach((el, i) => {
+            scriptLines.push(
+                `result = result.faces("${faceSelector}").workplane()` +
+                `.moveTo(${el.cx.toFixed(1)}, ${el.cy.toFixed(1)})` +
+                `.circle(${el.r.toFixed(1)}).extrude(${depthVal})`
+            );
+        });
+        
+        rects.forEach((el, i) => {
+            const cx = (el.x + el.w/2).toFixed(1);
+            const cy = (el.y + el.h/2).toFixed(1);
+            scriptLines.push(
+                `result = result.faces("${faceSelector}").workplane()` +
+                `.moveTo(${cx}, ${cy})` +
+                `.rect(${Math.abs(el.w).toFixed(1)}, ${Math.abs(el.h).toFixed(1)})` +
+                `.extrude(${depthVal})`
+            );
+        });
+        
+        scriptLines.push('cq.exporters.export(result, output_path)');
+    } else {
+        // Fresh geometry from sketch
+        if (circles.length > 0) {
+            const el = circles[0];
+            scriptLines.push(
+                `result = cq.Workplane("XY").circle(${el.r.toFixed(1)}).extrude(${depthVal})`
+            );
+            circles.slice(1).forEach(el => {
+                scriptLines.push(
+                    `result = result.faces(">Z").workplane()` +
+                    `.moveTo(${el.cx.toFixed(1)}, ${el.cy.toFixed(1)})` +
+                    `.circle(${el.r.toFixed(1)}).extrude(${depthVal})`
+                );
+            });
+        } else if (rects.length > 0) {
+            const el = rects[0];
+            scriptLines.push(
+                `result = cq.Workplane("XY")` +
+                `.rect(${Math.abs(el.w).toFixed(1)}, ${Math.abs(el.h).toFixed(1)})` +
+                `.extrude(${depthVal})`
+            );
+            rects.slice(1).forEach(el => {
+                scriptLines.push(
+                    `result = result.faces(">Z").workplane()` +
+                    `.rect(${Math.abs(el.w).toFixed(1)}, ${Math.abs(el.h).toFixed(1)})` +
+                    `.extrude(${depthVal})`
+                );
+            });
+        }
+        scriptLines.push('cq.exporters.export(result, output_path)');
+    }
+    
+    const script = scriptLines.join('\n');
+    
+    // Execute directly — bypasses Qwen completely
+    showToast('Extruding...');
+    addChatMessage('system', `Direct extrude ${depthVal}mm from 2D sketch`);
+    
+    const res = await fetch('/execute_raw_script', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({script})
+    });
+    const data = await res.json();
+    
+    if (data.job_id) {
+        // Update current script
+        window.currentScript = script;
+        if (window.monacoInstance) window.monacoInstance.setValue(script);
+        
+        connectSSE(data.job_id, onLog, (status) => {
+            if (status === 'done') {
+                loadSTL(`/model/${data.job_id}`);
+                window.currentJobId = data.job_id;
+                document.getElementById('downloadBtn').style.display = 'block';
+                addChatMessage('success', 'Extrude complete');
+                switchTab('prompt'); // Switch to see result
+            } else {
+                addChatMessage('error', 'Extrude failed — check script editor');
+            }
+        });
+    }
+}
+
+// Add hole directly — also bypasses Qwen
+async function addHoleFromSketch(dia, x, y) {
+    if (!window.currentScript) {
+        showToast('Generate a base geometry first in Prompt tab');
+        return;
+    }
+    
+    const faceSelector = getFaceSelectorFromPlane(sketch.plane);
+    
+    const lines = window.currentScript.split('\n')
+        .filter(l => !l.includes('exporters.export'));
+    
+    lines.push(
+        `result = result.faces("${faceSelector}").workplane()` +
+        `.moveTo(${parseFloat(x).toFixed(1)}, ${parseFloat(y).toFixed(1)})` +
+        `.hole(${parseFloat(dia).toFixed(1)})`
+    );
+    lines.push('cq.exporters.export(result, output_path)');
+    
+    const script = lines.join('\n');
+    window.currentScript = script;
+    
+    const res = await fetch('/execute_raw_script', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({script})
+    });
+    const data = await res.json();
+    if (data.job_id) {
+        connectSSE(data.job_id, onLog, (status) => {
+            if (status === 'done') loadSTL(`/model/${data.job_id}`);
+        });
+    }
+}
+
+function getFaceSelectorFromPlane(plane) {
+    const map = { top: '>Z', front: '>Y', side: '>X' };
+    return map[plane] || '>Z';
 }
 
 async function createHoleFromSketch() {
