@@ -338,7 +338,7 @@ def add_holes(result, hole_points, hole_dia, depth=None, face_selector=">Y"):
         wp = get_working_plane(result, face_selector)
         if depth:
             dp = validate_bounds(depth, 0.1, 1000.0, 10.0)
-            return wp.pushPoints(hole_points).hole(d, dp)
+            return wp.pushPoints(hole_points).circle(d / 2.0).cutBlind(-dp)
         return wp.pushPoints(hole_points).hole(d)
     except Exception:
         return result
