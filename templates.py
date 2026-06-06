@@ -338,8 +338,8 @@ def add_holes(result, hole_points, hole_dia, depth=None, face_selector=">Y"):
         wp = get_working_plane(result, face_selector)
         if depth:
             dp = validate_bounds(depth, 0.1, 1000.0, 10.0)
-            return wp.pushPoints(hole_points).circle(d / 2.0).cutBlind(-dp)
-        return wp.pushPoints(hole_points).hole(d)
+            return wp.pushPoints(hole_points).circle(d / 2.0).cutBlind(-dp, clean=False)
+        return wp.pushPoints(hole_points).hole(d, clean=False)
     except Exception:
         return result
 
@@ -366,8 +366,8 @@ def add_pocket(result, pocket_w, pocket_l, depth, x=0, y=0, face_selector=">Y"):
         cy = float(y)
         wp = get_working_plane(result, face_selector)
         if cx != 0 or cy != 0:
-            return wp.center(cx, cy).rect(w, l).cutBlind(-d)
-        return wp.rect(w, l).cutBlind(-d)
+            return wp.center(cx, cy).rect(w, l).cutBlind(-d, clean=False)
+        return wp.rect(w, l).cutBlind(-d, clean=False)
     except Exception:
         return result
 
@@ -380,13 +380,12 @@ def add_shell(result, wall_t, face_selector=">Y"):
 
 def add_boss(result, diameter, height, x=0, y=0, face_selector=">Y"):
     try:
-        d = validate_bounds(diameter, 0.1, 1000.0, 15.0)
-        h = validate_bounds(height, 0.1, 1000.0, 5.0)
-        cx = float(x)
-        cy = float(y)
+        d = validate_bounds(diameter, 0.1, 500.0, 10.0)
+        h = validate_bounds(height, 0.1, 500.0, 5.0)
+        px = validate_bounds(x, -500.0, 500.0, 0.0)
+        py = validate_bounds(y, -500.0, 500.0, 0.0)
         wp = get_working_plane(result, face_selector)
-        boss = wp.center(cx, cy).circle(d / 2).extrude(h)
-        return result.union(boss)
+        return wp.pushPoints([(px, py)]).circle(d/2).extrude(h, clean=False)
     except Exception:
         return result
 
