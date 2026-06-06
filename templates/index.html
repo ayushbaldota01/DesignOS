@@ -402,6 +402,7 @@
           <div class="shortcut" onclick="submitShortcut('shell with 2mm wall thickness')">shell 2mm</div>
         </div>
         <div class="chat-input-row">
+          <button class="tool-btn" style="padding:4px 8px; border-radius:4px; margin-right:4px;" onclick="undoCanvas()" title="Undo Last Operation"><span class="ti">↩</span></button>
           <span class="chat-ai-label">AI ›</span>
           <input type="text" class="chat-input" id="aiInput" placeholder="Describe modifications or operations..."
                  onkeydown="if(event.key==='Enter')submitChatInput()">
