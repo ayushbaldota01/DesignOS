@@ -8,7 +8,6 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { STLLoader } from "three/addons/loaders/STLLoader.js";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { TransformControls } from "three/addons/controls/TransformControls.js";
-import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
 
 const COLORS = {
   background: 0x141414,
@@ -97,15 +96,6 @@ export class CADViewer {
     this.controls.dampingFactor = 0.08;
     this.controls.minDistance = 5;
     this.controls.maxDistance = 10000;
-    this.controls.screenSpacePanning = true;
-
-    // Pro CAD Mouse Mappings (SolidWorks/Fusion Style)
-    // Left: Select only, Middle: Pan, Right: Orbit
-    this.controls.mouseButtons = {
-        LEFT: THREE.MOUSE.NONE,
-        MIDDLE: THREE.MOUSE.PAN,
-        RIGHT: THREE.MOUSE.ROTATE
-    };
 
     // TransformControls (Gizmo)
     this.transformControls = new TransformControls(this.camera, this.renderer.domElement);
@@ -146,11 +136,6 @@ export class CADViewer {
     rim.position.set(0, -100, -200);
     this.scene.add(rim);
 
-    // Pro CAD Realistic Lighting Environment
-    const pmremGenerator = new THREE.PMREMGenerator(this.renderer);
-    pmremGenerator.compileEquirectangularShader();
-    this.scene.environment = pmremGenerator.fromScene(new RoomEnvironment(), 0.04).texture;
-
     // Grid
     const grid = new THREE.GridHelper(400, 40, COLORS.gridCenter, COLORS.gridLines);
     grid.material.opacity = 0.5;
@@ -165,7 +150,6 @@ export class CADViewer {
 
     // Events
     this.renderer.domElement.addEventListener('click', (e) => this._onClick(e));
-    this.renderer.domElement.addEventListener('dblclick', (e) => this._onDoubleClick(e));
     this.renderer.domElement.addEventListener('mousemove', (e) => this._onMouseMove(e));
 
     this._animate();
@@ -814,41 +798,6 @@ export class CADViewer {
     if (pt) {
       this.onMouseMove3D({ x: pt.x.toFixed(1), y: pt.y.toFixed(1), z: pt.z.toFixed(1) });
     }
-  }
-
-  _onDoubleClick(e) {
-    this._updateMouse(e);
-    this._raycaster.setFromCamera(this._mouse, this.camera);
-    
-    let targetObjects = [];
-    if (Object.keys(this.partMeshes).length > 0) {
-        targetObjects = Object.values(this.partMeshes);
-    } else if (this.currentModel) {
-        targetObjects = this.currentModel.isGroup ? this.currentModel.children : [this.currentModel];
-    }
-    
-    const intersects = this._raycaster.intersectObjects(targetObjects, true);
-    if (intersects.length > 0) {
-        const pt = intersects[0].point;
-        this._animateCameraFocus(pt);
-    }
-  }
-
-  _animateCameraFocus(targetPoint) {
-    const startTarget = this.controls.target.clone();
-    const endTarget = targetPoint;
-    const duration = 400; // ms
-    const startTime = performance.now();
-    
-    const animate = (time) => {
-      const elapsed = time - startTime;
-      const t = Math.min(elapsed / duration, 1.0);
-      const easeT = t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t; // ease in-out
-      this.controls.target.lerpVectors(startTarget, endTarget, easeT);
-      this.controls.update();
-      if (t < 1.0) requestAnimationFrame(animate);
-    };
-    requestAnimationFrame(animate);
   }
 
   _getFaceSelector(n) {
