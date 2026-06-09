@@ -78,7 +78,82 @@ function redrawSketch() {
     drawGrid();
     drawElements();
     updateElementCount();
+    updateSketchTree();
+    if (typeof update3DOperationsState === 'function') update3DOperationsState();
 }
+
+function updateSketchTree() {
+    const tree = document.getElementById('manualSketchTree');
+    if (!tree) return;
+    
+    if (sketch.elements.length === 0) {
+        tree.innerHTML = '<div style="color:var(--text-dim); font-size:11px; padding:4px;">No sketch elements</div>';
+        return;
+    }
+    
+    let html = '';
+    sketch.elements.forEach((el, idx) => {
+        if (el.type === 'measure_temp') return;
+        
+        let icon = '▷', name = 'Element';
+        if (el.type === 'line') { icon = '/'; name = 'Line'; }
+        else if (el.type === 'rect') { icon = '□'; name = 'Rectangle'; }
+        else if (el.type === 'circle') { icon = '○'; name = 'Circle'; }
+        else if (el.type === 'point') { icon = '·'; name = 'Point'; }
+        
+        const isSel = el.selected ? 'background:var(--bg-primary);' : '';
+        const color = el.selected ? 'color:#fff;' : 'color:var(--text-primary);';
+
+        if (el.operation) {
+            let opIcon = el.operation.type === 'extrude' ? '⬆' : '○';
+            let opName = el.operation.type === 'extrude' ? 'Extrude' : 'Hole';
+            html += `<div style="padding:4px; font-size:11px; cursor:pointer; border-bottom:1px solid var(--border-light); ${isSel} ${color}" onclick="selectSketchElement(${idx})">
+                <span style="display:inline-block; width:16px; color:var(--text-dim);">${opIcon}</span> ${opName}
+                <div style="padding-left: 20px; color:var(--text-dim); margin-top: 4px;">
+                    <span style="display:inline-block; width:16px;">✏</span> ${name} ${idx+1}
+                </div>
+            </div>`;
+        } else {
+            html += `<div style="padding:4px; font-size:11px; cursor:pointer; border-bottom:1px solid var(--border-light); ${isSel} ${color}" onclick="selectSketchElement(${idx})">
+                <span style="display:inline-block; width:16px; color:var(--text-dim);">${icon}</span> ${name} ${idx+1}
+            </div>`;
+        }
+    });
+    tree.innerHTML = html;
+}
+
+window.selectSketchElement = function(idx) {
+    sketch.elements.forEach((e, i) => e.selected = (i === idx));
+    redrawSketch();
+    
+    const dataPanel = document.getElementById('manualSketchData');
+    if (!dataPanel) return;
+    
+    const el = sketch.elements[idx];
+    if (!el) return;
+    
+    let info = `<div style="margin-bottom:8px; font-weight:bold;">Element ${idx+1} (${el.type})</div>`;
+    if (el.type === 'line') {
+        info += `<div>Start: (${el.x1.toFixed(2)}, ${el.y1.toFixed(2)})</div>`;
+        info += `<div>End: (${el.x2.toFixed(2)}, ${el.y2.toFixed(2)})</div>`;
+        const len = Math.sqrt((el.x2-el.x1)**2 + (el.y2-el.y1)**2);
+        info += `<div>Length: ${len.toFixed(2)} mm</div>`;
+    } else if (el.type === 'circle') {
+        info += `<div>Center: (${el.cx.toFixed(2)}, ${el.cy.toFixed(2)})</div>`;
+        info += `<div>Radius: ${el.r.toFixed(2)} mm</div>`;
+        info += `<div>Diameter: ${(el.r*2).toFixed(2)} mm</div>`;
+    } else if (el.type === 'rect') {
+        info += `<div>Origin: (${el.x.toFixed(2)}, ${el.y.toFixed(2)})</div>`;
+        info += `<div>Size: ${el.w.toFixed(2)} × ${el.h.toFixed(2)} mm</div>`;
+    }
+    
+    if (el.operation) {
+        info += `<div style="margin-top:8px; padding-top:8px; border-top:1px solid var(--border); font-weight:bold;">Operation: ${el.operation.type.toUpperCase()}</div>`;
+        info += `<div>Depth: ${el.operation.depth} mm</div>`;
+    }
+    
+    dataPanel.innerHTML = info;
+};
 
 function drawGrid() {
     const ctx = sketch.ctx;
@@ -201,8 +276,65 @@ function updateElementCount() {
 
 // ── MOUSE EVENTS ─────────────────────────────────────────────────
 
+function findClickedElement(mx, my) {
+    let bestIdx = -1;
+    let bestDist = 5.0; // max click distance in mm
+
+    sketch.elements.forEach((el, idx) => {
+        if (el.type === 'line') {
+            const l2 = (el.x2-el.x1)**2 + (el.y2-el.y1)**2;
+            let t = ((mx-el.x1)*(el.x2-el.x1) + (my-el.y1)*(el.y2-el.y1)) / (l2 || 1e-6);
+            t = Math.max(0, Math.min(1, t));
+            const projX = el.x1 + t*(el.x2-el.x1);
+            const projY = el.y1 + t*(el.y2-el.y1);
+            const dist = Math.sqrt((mx-projX)**2 + (my-projY)**2);
+            if (dist < bestDist) { bestDist = dist; bestIdx = idx; }
+        } else if (el.type === 'circle') {
+            const d = Math.sqrt((mx-el.cx)**2 + (my-el.cy)**2);
+            const dist = Math.abs(d - el.r);
+            if (dist < bestDist || d <= el.r) { bestDist = dist; bestIdx = idx; }
+        } else if (el.type === 'rect') {
+            if (mx >= el.x && mx <= el.x + el.w && my >= el.y && my <= el.y + el.h) {
+                bestDist = 0; bestIdx = idx;
+            }
+        }
+    });
+    return bestIdx;
+}
+
+function update3DOperationsState() {
+    const hasSelection = sketch.elements.some(e => e.selected && (e.type === 'rect' || e.type === 'circle'));
+    const extrudeBtn = document.getElementById('manualExtrudeBtn');
+    const extrudeInput = document.getElementById('manualExtrudeDepth');
+    const holeBtn = document.getElementById('manualHoleBtn');
+    const holeDia = document.getElementById('manualHoleDia');
+    const holeDepth = document.getElementById('manualHoleDepth');
+    
+    const opacity = hasSelection ? '1' : '0.4';
+    
+    if (extrudeBtn) { extrudeBtn.disabled = !hasSelection; extrudeBtn.style.opacity = opacity; }
+    if (extrudeInput) extrudeInput.disabled = !hasSelection;
+    if (holeBtn) { holeBtn.disabled = !hasSelection; holeBtn.style.opacity = opacity; }
+    if (holeDia) holeDia.disabled = !hasSelection;
+    if (holeDepth) holeDepth.disabled = !hasSelection;
+}
+
 function onSketchDown(e) {
     const {mx, my} = getSketchCoords(e);
+    
+    if (sketch.tool === 'select') {
+        const clickedIdx = findClickedElement(mx, my);
+        if (clickedIdx !== -1) {
+            selectSketchElement(clickedIdx);
+        } else {
+            sketch.elements.forEach(el => el.selected = false);
+            redrawSketch();
+            const dataPanel = document.getElementById('manualSketchData');
+            if (dataPanel) dataPanel.innerHTML = 'Select an element to view data.';
+        }
+        return;
+    }
+
     sketch.drawing = true;
     sketch.startX = mx; sketch.startY = my;
 }
@@ -605,11 +737,11 @@ async function extrudeSketch(depth) {
     const depthVal = parseFloat(depth) || 10;
     
     // Filter usable elements
-    const rects = sketch.elements.filter(e => e.type === 'rect');
-    const circles = sketch.elements.filter(e => e.type === 'circle');
+    const rects = sketch.elements.filter(e => e.type === 'rect' && e.selected);
+    const circles = sketch.elements.filter(e => e.type === 'circle' && e.selected);
     
     if (rects.length === 0 && circles.length === 0) {
-        showToast('Draw a rectangle or circle profile first');
+        showToast('Select a rectangle or circle profile first');
         return;
     }
     
@@ -617,38 +749,31 @@ async function extrudeSketch(depth) {
     // Build CadQuery script directly from sketch geometry
     const faceSelector = getFaceSelectorFromPlane(sketch.plane);
     let scriptLines = [
-        "import cadquery as cq",
         "import sys",
         "sys.path.insert(0, r'H:\\DesignOS')",
+        "import cadquery as cq",
         ""
     ];
     
     // Check if we're adding to existing geometry
-    const hasExisting = window.currentScript && 
-                        window.currentScript.includes('output_path');
+    const hasExisting = window.currentScript && window.currentScript.includes('output_path');
     
     if (hasExisting) {
-        // Inject into existing script — add operation on selected face
-        scriptLines = window.currentScript.split('\n')
-            .filter(l => !l.includes('exporters.export'));
+        scriptLines = window.currentScript.split('\n').filter(l => !l.includes('exporters.export'));
         
-        // Add sketch elements as operations on existing geometry
-        circles.forEach((el, i) => {
+        circles.forEach(el => {
             scriptLines.push(
-                `result = result.faces("${faceSelector}").workplane()` +
-                `.moveTo(${el.cx.toFixed(1)}, ${el.cy.toFixed(1)})` +
-                `.circle(${el.r.toFixed(1)}).extrude(${depthVal})`
+                `_t = cq.Workplane("XZ").pushPoints([[${el.cx.toFixed(1)}, ${el.cy.toFixed(1)}]]).circle(${el.r.toFixed(1)}).extrude(${depthVal})`,
+                `result = result.add(_t.vals())`
             );
         });
         
-        rects.forEach((el, i) => {
+        rects.forEach(el => {
             const cx = (el.x + el.w/2).toFixed(1);
             const cy = (el.y + el.h/2).toFixed(1);
             scriptLines.push(
-                `result = result.faces("${faceSelector}").workplane()` +
-                `.moveTo(${cx}, ${cy})` +
-                `.rect(${Math.abs(el.w).toFixed(1)}, ${Math.abs(el.h).toFixed(1)})` +
-                `.extrude(${depthVal})`
+                `_t = cq.Workplane("XZ").pushPoints([[${cx}, ${cy}]]).rect(${Math.abs(el.w).toFixed(1)}, ${Math.abs(el.h).toFixed(1)}).extrude(${depthVal})`,
+                `result = result.add(_t.vals())`
             );
         });
         
@@ -658,27 +783,35 @@ async function extrudeSketch(depth) {
         if (circles.length > 0) {
             const el = circles[0];
             scriptLines.push(
-                `result = cq.Workplane("XY").circle(${el.r.toFixed(1)}).extrude(${depthVal})`
+                `result = cq.Workplane("XZ").pushPoints([[${el.cx.toFixed(1)}, ${el.cy.toFixed(1)}]]).circle(${el.r.toFixed(1)}).extrude(${depthVal})`
             );
             circles.slice(1).forEach(el => {
                 scriptLines.push(
-                    `result = result.faces(">Z").workplane()` +
-                    `.moveTo(${el.cx.toFixed(1)}, ${el.cy.toFixed(1)})` +
-                    `.circle(${el.r.toFixed(1)}).extrude(${depthVal})`
+                    `_t = cq.Workplane("XZ").pushPoints([[${el.cx.toFixed(1)}, ${el.cy.toFixed(1)}]]).circle(${el.r.toFixed(1)}).extrude(${depthVal})`,
+                    `result = result.add(_t.vals())`
+                );
+            });
+            rects.forEach(el => {
+                const cx = (el.x + el.w/2).toFixed(1);
+                const cy = (el.y + el.h/2).toFixed(1);
+                scriptLines.push(
+                    `_t = cq.Workplane("XZ").pushPoints([[${cx}, ${cy}]]).rect(${Math.abs(el.w).toFixed(1)}, ${Math.abs(el.h).toFixed(1)}).extrude(${depthVal})`,
+                    `result = result.add(_t.vals())`
                 );
             });
         } else if (rects.length > 0) {
             const el = rects[0];
+            const cx = (el.x + el.w/2).toFixed(1);
+            const cy = (el.y + el.h/2).toFixed(1);
             scriptLines.push(
-                `result = cq.Workplane("XY")` +
-                `.rect(${Math.abs(el.w).toFixed(1)}, ${Math.abs(el.h).toFixed(1)})` +
-                `.extrude(${depthVal})`
+                `result = cq.Workplane("XZ").pushPoints([[${cx}, ${cy}]]).rect(${Math.abs(el.w).toFixed(1)}, ${Math.abs(el.h).toFixed(1)}).extrude(${depthVal})`
             );
             rects.slice(1).forEach(el => {
+                const ncx = (el.x + el.w/2).toFixed(1);
+                const ncy = (el.y + el.h/2).toFixed(1);
                 scriptLines.push(
-                    `result = result.faces(">Z").workplane()` +
-                    `.rect(${Math.abs(el.w).toFixed(1)}, ${Math.abs(el.h).toFixed(1)})` +
-                    `.extrude(${depthVal})`
+                    `_t = cq.Workplane("XZ").pushPoints([[${ncx}, ${ncy}]]).rect(${Math.abs(el.w).toFixed(1)}, ${Math.abs(el.h).toFixed(1)}).extrude(${depthVal})`,
+                    `result = result.add(_t.vals())`
                 );
             });
         }
@@ -689,7 +822,7 @@ async function extrudeSketch(depth) {
     
     // Execute directly — bypasses Qwen completely
     showToast('Extruding...');
-    addChatMessage('system', `Direct extrude ${depthVal}mm from 2D sketch`);
+    if (typeof addChatMsg === 'function') addChatMsg('system', `Direct extrude ${depthVal}mm from 2D sketch`);
     
     const res = await fetch('/execute_raw_script', {
         method: 'POST',
@@ -703,17 +836,35 @@ async function extrudeSketch(depth) {
         window.currentScript = script;
         if (window.monacoInstance) window.monacoInstance.setValue(script);
         
-        connectSSE(data.job_id, onLog, (status) => {
-            if (status === 'done') {
-                loadSTL(`/model/${data.job_id}`);
-                window.currentJobId = data.job_id;
-                document.getElementById('downloadBtn').style.display = 'block';
-                addChatMessage('success', 'Extrude complete');
-                switchTab('prompt'); // Switch to see result
-            } else {
-                addChatMessage('error', 'Extrude failed — check script editor');
-            }
-        });
+        const es = new EventSource(`/stream/${data.job_id}`);
+        es.onmessage = function(event) {
+            try {
+                const entry = JSON.parse(event.data);
+                if (entry.complete || entry.status === 'completed') {
+                    es.close();
+                    if (window.viewerInstance) window.viewerInstance.loadSTL(`/model/${data.job_id}`);
+                    window.currentJobId = data.job_id;
+                    const dlBtn = document.getElementById('downloadBtn');
+                    if (dlBtn) dlBtn.style.display = 'block';
+                    if (typeof addChatMsg === 'function') addChatMsg('success', 'Extrude complete');
+                    
+                    // Track operation in tree
+                    rects.forEach(e => e.operation = { type: 'extrude', depth: depthVal });
+                    circles.forEach(e => e.operation = { type: 'extrude', depth: depthVal });
+                    if (typeof updateSketchTree === 'function') updateSketchTree();
+                    
+                    if (typeof openMini3DView === 'function') {
+                        openMini3DView();
+                    } else {
+                        if (typeof switchTab === 'function') switchTab('prompt'); // fallback
+                    }
+                } else if (entry.status === 'failed' || (entry.error && !entry.complete)) {
+                    es.close();
+                    if (typeof addChatMsg === 'function') addChatMsg('error', 'Extrude failed — check script editor');
+                }
+            } catch (e) {}
+        };
+        es.onerror = function() { es.close(); };
     }
 }
 
@@ -726,17 +877,16 @@ async function addHoleFromSketch(dia, x, y) {
     
     const faceSelector = getFaceSelectorFromPlane(sketch.plane);
     
-    const lines = window.currentScript.split('\n')
+    const lines = window.currentScript.split('\\n')
         .filter(l => !l.includes('exporters.export'));
     
     lines.push(
-        `result = result.faces("${faceSelector}").workplane()` +
-        `.moveTo(${parseFloat(x).toFixed(1)}, ${parseFloat(y).toFixed(1)})` +
-        `.hole(${parseFloat(dia).toFixed(1)})`
+        `_t = cq.Workplane("XZ").pushPoints([[${parseFloat(x).toFixed(1)}, ${parseFloat(y).toFixed(1)}]]).circle(${parseFloat(dia/2).toFixed(1)}).extrude(100)`,
+        `result = result.cut(_t)`
     );
     lines.push('cq.exporters.export(result, output_path)');
     
-    const script = lines.join('\n');
+    const script = lines.join('\\n');
     window.currentScript = script;
     
     const res = await fetch('/execute_raw_script', {
@@ -746,9 +896,21 @@ async function addHoleFromSketch(dia, x, y) {
     });
     const data = await res.json();
     if (data.job_id) {
-        connectSSE(data.job_id, onLog, (status) => {
-            if (status === 'done') loadSTL(`/model/${data.job_id}`);
-        });
+        const es = new EventSource(`/stream/${data.job_id}`);
+        es.onmessage = function(event) {
+            try {
+                const entry = JSON.parse(event.data);
+                if (entry.complete || entry.status === 'completed') {
+                    es.close();
+                    if (window.viewerInstance) window.viewerInstance.loadSTL(`/model/${data.job_id}`);
+                    window.currentJobId = data.job_id;
+                    if (typeof openMini3DView === 'function') openMini3DView();
+                } else if (entry.status === 'failed' || (entry.error && !entry.complete)) {
+                    es.close();
+                }
+            } catch (e) {}
+        };
+        es.onerror = function() { es.close(); };
     }
 }
 
@@ -758,17 +920,83 @@ function getFaceSelectorFromPlane(plane) {
 }
 
 async function createHoleFromSketch() {
-    if (sketch.elements.filter(e => e.type !== 'template_marker' && e.type !== 'measure_temp').length === 0) {
-        showToast('Draw a closed profile (circle/rectangle) or point first');
+    const selected = sketch.elements.filter(e => e.selected && (e.type === 'rect' || e.type === 'circle'));
+    if (selected.length === 0) {
+        showToast('Select a closed profile (circle/rectangle) first');
         return;
     }
-    const dia = document.getElementById('manualHoleDia')?.value || 5;
-    const depth = document.getElementById('manualHoleDepth')?.value || 10;
-    const description = sketchToDescription();
-    const instruction = `Create hole from this 2D sketch profile (Diameter: ${dia}mm, Depth: ${depth}mm):\n${description}`;
-    switchTab('prompt');
-    document.getElementById('aiInput').value = instruction;
-    await submitChat(instruction);
+    
+    const hasExisting = window.currentScript && window.currentScript.includes('output_path');
+    if (!hasExisting) {
+        showToast('Extrude a base shape first before creating a hole');
+        return;
+    }
+
+    const depthVal = parseFloat(document.getElementById('manualHoleDepth')?.value) || 10;
+    const faceSelector = getFaceSelectorFromPlane(sketch.plane) || ">Z";
+
+    let scriptLines = window.currentScript.split('\\n').filter(l => !l.includes('exporters.export'));
+    
+    selected.forEach(el => {
+        if (el.type === 'circle') {
+            scriptLines.push(
+                `_t = cq.Workplane("XZ").pushPoints([[${el.cx.toFixed(1)}, ${el.cy.toFixed(1)}]]).circle(${el.r.toFixed(1)}).extrude(${depthVal})`,
+                `result = result.cut(_t)`
+            );
+        } else if (el.type === 'rect') {
+            const cx = (el.x + el.w/2).toFixed(1);
+            const cy = (el.y + el.h/2).toFixed(1);
+            scriptLines.push(
+                `_t = cq.Workplane("XZ").pushPoints([[${cx}, ${cy}]]).rect(${Math.abs(el.w).toFixed(1)}, ${Math.abs(el.h).toFixed(1)}).extrude(${depthVal})`,
+                `result = result.cut(_t)`
+            );
+        }
+    });
+
+    scriptLines.push('cq.exporters.export(result, output_path)');
+    window.currentScript = scriptLines.join('\\n');
+    if (typeof updateEditorScript === 'function') updateEditorScript(window.currentScript);
+
+    showToast('Cutting hole...');
+    if (typeof addChatMsg === 'function') addChatMsg('system', `Direct cut from 2D sketch (${depthVal}mm deep)`);
+
+    const res = await fetch('/execute_raw_script', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({script: window.currentScript})
+    });
+    const data = await res.json();
+    
+    if (data.job_id) {
+        const es = new EventSource(`/stream/${data.job_id}`);
+        es.onmessage = function(event) {
+            try {
+                const entry = JSON.parse(event.data);
+                if (entry.complete || entry.status === 'completed') {
+                    es.close();
+                    if (window.viewerInstance) window.viewerInstance.loadSTL(`/model/${data.job_id}`);
+                    window.currentJobId = data.job_id;
+                    const dlBtn = document.getElementById('downloadBtn');
+                    if (dlBtn) dlBtn.style.display = 'block';
+                    if (typeof addChatMsg === 'function') addChatMsg('success', 'Hole cut complete');
+                    
+                    // Track operation in tree
+                    selected.forEach(e => e.operation = { type: 'hole', depth: depthVal });
+                    if (typeof updateSketchTree === 'function') updateSketchTree();
+                    
+                    if (typeof openMini3DView === 'function') {
+                        openMini3DView();
+                    } else {
+                        if (typeof switchTab === 'function') switchTab('prompt'); // fallback
+                    }
+                } else if (entry.status === 'failed' || (entry.error && !entry.complete)) {
+                    es.close();
+                    if (typeof addChatMsg === 'function') addChatMsg('error', 'Hole cut failed — check script editor');
+                }
+            } catch (e) {}
+        };
+        es.onerror = function() { es.close(); };
+    }
 }
 
 function sketchToDescription() {

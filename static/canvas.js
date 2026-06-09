@@ -322,11 +322,11 @@ window.addBlockToSession = async function(blockType) {
 };
 
 // ═══════════════════════════════════════════════════════════════
-// Direct Feature Operations (NO AI — uses /canvas/add-block)
+// Direct Feature Operations (NO AI — uses /canvas/add-block or /execute_raw_script)
 // ═══════════════════════════════════════════════════════════════
 
 window.applyOp = async function(opType) {
-  if (!canvas.sessionId) { showToast('Generate a part first'); return; }
+  if (!canvas.sessionId && !window.currentScript) { showToast('Generate a part first'); return; }
 
   const faceSelector = window.clickedFaceSelector || '>Y';
   const parentId = canvas.selectedBlockId || '001';
@@ -380,8 +380,89 @@ window.applyOp = async function(opType) {
 
   hideOpPanel();
   document.getElementById('faceOpsBar').classList.remove('visible');
+  
+  if (!canvas.sessionId && window.currentScript) {
+      // MANUAL RAW SCRIPT ROUTING
+      showGenOverlay(`Applying ${opType} to manual sketch...`);
+      if (typeof addChatMsg === 'function') addChatMsg('op', `Adding ${opType} on face ${faceSelector}...`);
+      
+      let rawLine = '';
+      if (opType === 'hole') {
+          const dia = parseFloat(document.getElementById('op_dia')?.value) || 6.6;
+          const x = parseFloat(document.getElementById('op_x')?.value) || 0;
+          const y = parseFloat(document.getElementById('op_y')?.value) || 0;
+          const count = document.getElementById('op_count')?.value || '4';
+          let ptsStr = `[[${x},${y}]]`;
+          if (count === '4') ptsStr = `[[${x+20},${y+15}],[-${x-20},${y+15}],[${x+20},-${y-15}],[-${x-20},-${y-15}]]`;
+          else if (count === '2') ptsStr = `[[${x+20},${y}],[-${x-20},${y}]]`;
+          rawLine = `result = result.faces("${faceSelector}").workplane().pushPoints(${ptsStr}).hole(${dia})`;
+      } else if (opType === 'pocket') {
+          const pw = parseFloat(document.getElementById('op_pw')?.value) || 30;
+          const pl = parseFloat(document.getElementById('op_pl')?.value) || 20;
+          const pd = parseFloat(document.getElementById('op_pd')?.value) || 5;
+          rawLine = `result = result.faces("${faceSelector}").workplane().rect(${pw}, ${pl}).extrude(-${pd})`;
+      } else if (opType === 'boss') {
+          const bd = parseFloat(document.getElementById('op_bd')?.value) || 15;
+          const bh = parseFloat(document.getElementById('op_bh')?.value) || 5;
+          rawLine = `result = result.faces("${faceSelector}").workplane().circle(${bd/2}).extrude(${bh})`;
+      } else if (opType === 'fillet') {
+          const r = parseFloat(document.getElementById('op_fr')?.value) || 2;
+          const edges = document.getElementById('op_fedges')?.value || '|Z';
+          if (edges === 'all') rawLine = `result = result.edges().fillet(${r})`;
+          else rawLine = `result = result.edges("${edges}").fillet(${r})`;
+      } else if (opType === 'chamfer') {
+          const size = parseFloat(document.getElementById('op_cs')?.value) || 1;
+          rawLine = `result = result.edges().chamfer(${size})`;
+      } else if (opType === 'extrude') {
+          const dist = parseFloat(document.getElementById('op_ext')?.value) || 10;
+          const dir = document.getElementById('op_dir')?.value || 'Outward';
+          const sign = dir.includes('Inward') ? '-' : '';
+          rawLine = `result = result.faces("${faceSelector}").workplane().extrude(${sign}${dist})`;
+      } else if (opType === 'shell') {
+          const wall_t = parseFloat(document.getElementById('op_st')?.value) || 2;
+          rawLine = `result = result.faces("${faceSelector}").shell(-${wall_t})`;
+      }
+
+      if (rawLine) {
+          const lines = window.currentScript.split('\\n');
+          const exportIdx = lines.findIndex(l => l.includes('cq.exporters.export') || l.includes('output_path'));
+          if (exportIdx !== -1) lines.splice(exportIdx, 0, rawLine);
+          else lines.push(rawLine);
+          
+          window.currentScript = lines.join('\\n');
+          if (typeof updateEditorScript === 'function') updateEditorScript(window.currentScript);
+          
+          try {
+              const res = await fetch('/execute_raw_script', {
+                  method: 'POST',
+                  headers: {'Content-Type': 'application/json'},
+                  body: JSON.stringify({script: window.currentScript})
+              });
+              const data = await res.json();
+              if (data.job_id) {
+                  connectSSE(data.job_id, (log) => {
+                      if (log.message && typeof addChatMsg === 'function') addChatMsg(log.status === 'error' ? 'error' : 'system', log.message);
+                  }, (status) => {
+                      hideGenOverlay();
+                      if (status === 'done') {
+                          if (window.viewerInstance) window.viewerInstance.loadSTL(`/model/${data.job_id}`);
+                          window.currentJobId = data.job_id;
+                      }
+                  });
+              } else {
+                  hideGenOverlay();
+                  showToast('Error executing script');
+              }
+          } catch (err) {
+              hideGenOverlay();
+              showToast('Error: ' + err.message);
+          }
+      }
+      return;
+  }
+
   showGenOverlay(`Applying ${opType}...`);
-  addChatMsg('op', `Adding ${opType} on face ${faceSelector}...`);
+  if (typeof addChatMsg === 'function') addChatMsg('op', `Adding ${opType} on face ${faceSelector}...`);
 
   try {
     const res = await fetch('/canvas/add-block', {
@@ -747,13 +828,13 @@ window.faceOp = function(opType) {
     return;
   }
   if (opType === 'edit2d') {
-    if (!canvas.sessionId) { showToast('Generate a part first'); return; }
+    if (!canvas.sessionId && !window.currentScript) { showToast('Generate a part first'); return; }
     if (!canvas.selectedFace && !window.clickedFaceSelector) { showToast('Select a face first'); return; }
     document.getElementById('faceOpsBar').classList.remove('visible');
     openSketch2d();
     return;
   }
-  if (!canvas.sessionId) { showToast('Generate a part first'); return; }
+  if (!canvas.sessionId && !window.currentScript) { showToast('Generate a part first'); return; }
   showOpPanel(opType);
 };
 
@@ -812,7 +893,7 @@ window.hideOpPanel = function() {
 };
 
 window.toolbarOp = function(opType) {
-  if (!canvas.sessionId) { showToast('Generate a part first'); return; }
+  if (!canvas.sessionId && !window.currentScript) { showToast('Generate a part first'); return; }
   showOpPanel(opType);
 };
 
